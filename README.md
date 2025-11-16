@@ -1,0 +1,114 @@
+# maku
+
+[![CI](https://github.com/miruky/maku/actions/workflows/ci.yml/badge.svg)](https://github.com/miruky/maku/actions/workflows/ci.yml)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Test](https://img.shields.io/badge/Test-Vitest-6E9F18?logo=vitest&logoColor=white)](https://vitest.dev/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+**Markdownを書くだけでスライドになる、100種類のテーマから選べるプレゼンテーションツールです。**
+
+## 概要
+
+Markdownを貼り付けると、その場でスライドに変換して表示します。`---` で区切れば次のスライドへ、HTMLコメントのディレクティブでレイアウト・背景・段階表示・発表者ノートを指定でき、表やコード、段組にも対応します。デザインは色25系統 × 昼夜 × 明朝/ゴシックの100テーマから選べ、選んだテーマはURLに乗るので共有もできます。全文ブラウザ内で動き、サーバーには何も送りません。LLMで整えたMarkdownをそのまま流し込むことを想定しています。
+
+遊ぶ: https://miruky.github.io/maku/
+
+### なぜ作ったのか
+
+発表資料づくりは、内容を考える時間より、体裁を整える時間に食われがちです。原稿がMarkdownで手元にあるなら、区切りと少しの指示だけでスライドになり、テーマを選ぶだけで体裁が決まるべきです。凝ったテンプレートを編集するのではなく、文章に集中したまま見栄えのする資料にしたくて作りました。テーマを100用意したのは、内容の性格に合う「ちょうどいい一つ」を選ぶ楽しさのためです。
+
+## 書き方
+
+| 記法 | 効果 |
+|:--|:--|
+| `---`(単独行) | スライドの区切り |
+| 先頭の `---` ブロック | フロントマター(`title:`、`theme:` など) |
+| `<!-- center -->` / `title` / `full` | レイアウト(中央寄せ・表紙・全面) |
+| `<!-- layout: split -->` + `===` | 段組(左右) |
+| `<!-- bg: 色またはURL -->` | スライドの背景(色・画像) |
+| `<!-- incremental -->` | 箇条書きなどを一つずつ表示 |
+| `<!-- class: 名前 -->` | 任意のクラスを付与 |
+| `???` 以降 | 発表者ノート |
+
+本文では見出し・段落・**強調**・打ち消し・`コード`・リンク・画像・引用・箇条書き(入れ子)・番号付き・タスクリスト・表・コードブロックが使えます。
+
+## 使い方(操作)
+
+- **→ / Space**: 次へ(段階表示も進む) / **←**: 戻る / **Home・End**: 最初・最後
+- **F**: 全画面 / **O**: スライド一覧 / **S**: 発表者ノートとタイマー / **E**: 編集パネル
+- **T**: テーマ選択(100種類) / **P**: PDFに書き出し(印刷) / **?**: ヘルプ
+- スマートフォンは左右スワイプで移動
+
+## アーキテクチャ
+
+![makuのアーキテクチャ](docs/architecture.svg)
+
+Markdown文書を `parseDeck` がフロントマター・スライド・ディレクティブ・ノートに分解し、`markdown`/`render` がスライドのHTMLを、`themes` が100種類の配色・書体を、`Presenter` が表示と移動・段階表示・ノートを受け持ちます。解釈・描画・テーマ生成はDOMから独立した純粋な処理で、ブラウザなしでテストしています。
+
+## 技術スタック
+
+| カテゴリ | 技術 |
+|:--|:--|
+| 言語 | TypeScript 5(strict) |
+| ビルド | Vite |
+| テスト | Vitest(28テスト) |
+| リンタ | ESLint + Prettier |
+| CI / CD | GitHub Actions |
+| 配信 | GitHub Pages |
+| 実行時依存 | なし |
+
+## プロジェクト構成
+
+- `src/markdown.ts` — スライド本文用のMarkdownレンダラ
+- `src/deck.ts` — 文書をスライド集合へ分解(フロントマター・区切り・指示・ノート・段組)
+- `src/themes.ts` — 100テーマの生成(色25系統 × 昼夜 × 明朝/ゴシック)
+- `src/render.ts` — スライド1枚のHTML生成
+- `src/present.ts` — 表示・移動・段階表示・ノート・進捗
+- `src/main.ts` — エディタ・テーマ選択・一覧・全画面・PDFなどのUI
+- `docs/architecture.svg` — アーキテクチャ図
+
+## はじめ方
+
+### 前提条件
+
+- Node.js 20 以上
+
+### セットアップ
+
+```bash
+git clone https://github.com/miruky/maku.git
+cd maku
+npm install
+npm run dev
+```
+
+### テストの実行
+
+```bash
+npm test
+```
+
+### Lintの実行
+
+```bash
+npm run lint
+```
+
+### デプロイ
+
+`main` ブランチへのプッシュで GitHub Actions がビルドし、GitHub Pages へ配信します。
+
+## 設計方針
+
+- **文章に集中させる** — 区切りと最小限の指示だけでスライドになり、体裁はテーマが引き受ける
+- **100テーマを体系生成** — 色・明度・書体を規則的に組み、どれも統一感のある仕上がりにする
+- **解釈と表示の分離** — パース・描画・テーマをDOM非依存にし、テストで担保する
+- **データを外に出さない** — 変換も表示もブラウザ内で完結する
+
+## 制約
+
+数式(KaTeX等)や、ブラウザ依存でばらつくフォントの埋め込みには対応していません。PDFはブラウザの印刷機能を用いるため、余白や改ページの細部は環境差が出ることがあります。
+
+## ライセンス
+
+[MIT](LICENSE)
