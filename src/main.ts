@@ -340,6 +340,9 @@ function toggle(id: string, force?: boolean): void {
   if (id === 'editor') $('edit').classList.toggle('on', !el.hidden);
 }
 $('edit').addEventListener('click', () => toggle('editor'));
+// 既定で編集パネルを開いておく。横並びで原稿とプレビューを見渡せて書き始めやすい。
+// 狭い画面では編集がスライド全面を覆うので、その場合だけ閉じたままにする。
+if (window.matchMedia('(min-width: 821px)').matches) toggle('editor', true);
 $('notes-btn').addEventListener('click', () => toggle('notes-panel'));
 $('overview').addEventListener('click', () => {
   buildOverview();
