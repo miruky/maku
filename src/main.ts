@@ -1,5 +1,6 @@
 import './style.css';
 import { parseDeck } from './deck';
+import { exportPdf, exportPptx } from './export';
 import { slideHtml } from './render';
 import { Presenter } from './present';
 import { applyTheme, DEFAULT_THEME_ID, THEMES, themeById } from './themes';
@@ -95,7 +96,8 @@ const ICON = {
   grid: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="3" width="7" height="7" rx="1.2"/><rect x="14" y="3" width="7" height="7" rx="1.2"/><rect x="3" y="14" width="7" height="7" rx="1.2"/><rect x="14" y="14" width="7" height="7" rx="1.2"/></svg>',
   notes: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M5 4h14v16H5z"/><path d="M8.5 9h7M8.5 13h7M8.5 17h4"/></svg>',
   play: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M4 4h6v6H4zM4 14h16v6H4zM14 4h6v6h-6z" opacity="0"/><path d="M8 5v14l11-7z"/></svg>',
-  pdf: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3h7l4 4v14H7z" opacity="0"/><path d="M12 3v12M8 11l4 4 4-4"/><path d="M5 21h14"/></svg>',
+  pdf: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M8 11l4 4 4-4"/><path d="M5 21h14"/></svg>',
+  open: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>',
   share: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="12" r="2.4"/><circle cx="18" cy="6" r="2.4"/><circle cx="18" cy="18" r="2.4"/><path d="M8.1 11l7.8-4M8.1 13l7.8 4"/></svg>',
   theme: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18 3 3 0 0 0 0-6 1.5 1.5 0 0 1 0-3 3 3 0 0 0 0-6z" fill="currentColor" stroke="none"/></svg>',
   help: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 0 1 4.5 1.5c0 1.7-2 2-2 3.5"/><circle cx="12" cy="17.5" r="0.6" fill="currentColor"/></svg>',
@@ -106,11 +108,12 @@ app.innerHTML = `
     <span class="logo">maku</span>
     <span class="bar-title" id="bar-title"></span>
     <div class="bar-actions">
+      <button class="ico" id="open" title="Markdownを開く">${ICON.open}</button>
       <button class="ico" id="edit" title="編集 (E)">${ICON.edit}</button>
       <button class="ico" id="overview" title="一覧 (O)">${ICON.grid}</button>
       <button class="ico" id="notes-btn" title="ノートと発表者タイマー (S)">${ICON.notes}</button>
       <button class="ico" id="theme-btn" title="テーマ (T)">${ICON.theme}</button>
-      <button class="ico" id="pdf" title="PDFに書き出し (P)">${ICON.pdf}</button>
+      <button class="ico" id="export" title="書き出し (P)">${ICON.pdf}</button>
       <button class="ico" id="share" title="リンクをコピー">${ICON.share}</button>
       <button class="ico" id="present" title="全画面 (F)">${ICON.play}</button>
       <button class="ico" id="help-btn" title="ヘルプ (?)">${ICON.help}</button>
@@ -170,12 +173,45 @@ app.innerHTML = `
         <dt>S</dt><dd>発表者ノート・タイマー</dd>
         <dt>E</dt><dd>編集パネル</dd>
         <dt>T</dt><dd>テーマ選択</dd>
-        <dt>P</dt><dd>PDF書き出し</dd>
+        <dt>P</dt><dd>書き出し(PDF / PPTX / Google)</dd>
         <dt>Esc</dt><dd>パネルを閉じる</dd>
       </dl>
       <button class="mini" data-close="help-overlay">閉じる</button>
     </div>
   </div>
+
+  <div class="menu" id="export-menu" hidden>
+    <button data-export="pdf">PDF を書き出す</button>
+    <button data-export="pptx">PowerPoint (.pptx)</button>
+    <button data-export="gslides">Google スライド用に書き出す</button>
+    <button data-export="md">Markdown を保存</button>
+    <button data-export="print">ブラウザで印刷</button>
+  </div>
+
+  <input type="file" id="file" accept=".md,.markdown,.txt,text/markdown,text/plain" hidden />
+
+  <div class="busy" id="busy" hidden>
+    <div class="busy-card"><span class="spinner" aria-hidden="true"></span><span id="busy-text">書き出し中…</span></div>
+  </div>
+
+  <div class="overlay help" id="gslides-modal" hidden>
+    <div class="help-card">
+      <h2>Google スライドで開く</h2>
+      <p class="gs-lead">.pptx を書き出しました。次の手順で Google スライドの編集可能なファイルになります。</p>
+      <ol class="gs-steps">
+        <li>Google ドライブに、書き出した <code>.pptx</code> をアップロード</li>
+        <li>そのファイルを右クリック → 「アプリで開く」→「Google スライド」</li>
+        <li>または Google スライドで「ファイル → スライドのインポート」から選択</li>
+      </ol>
+      <div class="gs-actions">
+        <a class="mini" href="https://slides.google.com" target="_blank" rel="noopener">Google スライドを開く</a>
+        <a class="mini" href="https://drive.google.com" target="_blank" rel="noopener">Google ドライブを開く</a>
+        <button class="mini" data-close="gslides-modal">閉じる</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast-wrap" id="toast-wrap" aria-live="polite"></div>
 
   <div id="print-deck" aria-hidden="true"></div>
 `;
@@ -278,8 +314,56 @@ $('present').addEventListener('click', () => {
   else void deckRoot.requestFullscreen?.();
 });
 
-// ── PDF(印刷)──
-$('pdf').addEventListener('click', () => doPrint());
+// ── 書き出し ──
+const exportMenu = $('export-menu');
+$('export').addEventListener('click', (e) => {
+  e.stopPropagation();
+  exportMenu.hidden = !exportMenu.hidden;
+});
+document.addEventListener('click', () => (exportMenu.hidden = true));
+exportMenu.addEventListener('click', (e) => e.stopPropagation());
+
+exportMenu.querySelectorAll<HTMLButtonElement>('[data-export]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    exportMenu.hidden = true;
+    void runExport(btn.dataset.export!);
+  });
+});
+
+async function runExport(kind: string): Promise<void> {
+  const deck = parseDeck(mdInput.value);
+  if (deck.slides.length === 0) {
+    toast('スライドがありません');
+    return;
+  }
+  if (kind === 'print') {
+    doPrint();
+    return;
+  }
+  if (kind === 'md') {
+    download(`${deck.meta.title || 'slides'}.md`, mdInput.value, 'text/markdown');
+    toast('Markdown を保存しました');
+    return;
+  }
+  setBusy(true, '書き出し中…');
+  const onProgress = (done: number, total: number): void => setBusy(true, `書き出し中… ${done} / ${total}`);
+  try {
+    if (kind === 'pdf') {
+      await exportPdf(deck, currentTheme, onProgress);
+      toast('PDF を書き出しました');
+    } else if (kind === 'pptx' || kind === 'gslides') {
+      await exportPptx(deck, currentTheme, onProgress);
+      if (kind === 'gslides') toggle('gslides-modal', true);
+      else toast('PowerPoint (.pptx) を書き出しました');
+    }
+  } catch (err) {
+    toast(`書き出しに失敗しました(外部画像はCORSで取り込めないことがあります)`);
+    console.error(err);
+  } finally {
+    setBusy(false);
+  }
+}
+
 function doPrint(): void {
   const deck = parseDeck(mdInput.value);
   $('print-deck').innerHTML = deck.slides
@@ -287,6 +371,51 @@ function doPrint(): void {
     .join('');
   window.print();
 }
+
+function setBusy(show: boolean, text = ''): void {
+  $('busy').hidden = !show;
+  if (show) $('busy-text').textContent = text;
+}
+
+function toast(message: string): void {
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.textContent = message;
+  $('toast-wrap').appendChild(el);
+  window.setTimeout(() => el.classList.add('show'), 10);
+  window.setTimeout(() => {
+    el.classList.remove('show');
+    window.setTimeout(() => el.remove(), 300);
+  }, 2600);
+}
+
+function download(name: string, text: string, type: string): void {
+  const url = URL.createObjectURL(new Blob([text], { type }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ── Markdownファイルを開く / ドロップ ──
+$('open').addEventListener('click', () => $<HTMLInputElement>('file').click());
+$<HTMLInputElement>('file').addEventListener('change', (e) => {
+  const file = (e.target as HTMLInputElement).files?.[0];
+  if (file) void loadFile(file);
+});
+async function loadFile(file: File): Promise<void> {
+  mdInput.value = await file.text();
+  rebuild(false);
+  toast(`${file.name} を読み込みました`);
+}
+['dragover', 'drop'].forEach((type) => {
+  deckRoot.addEventListener(type, (e) => e.preventDefault());
+});
+deckRoot.addEventListener('drop', (e) => {
+  const file = (e as DragEvent).dataTransfer?.files?.[0];
+  if (file) void loadFile(file);
+});
 
 // ── リンク共有 ──
 $('share').addEventListener('click', async () => {
@@ -410,13 +539,16 @@ window.addEventListener('keydown', (ev) => {
       break;
     case 'p':
     case 'P':
-      doPrint();
+      $('export').click();
       break;
     case '?':
       toggle('help-overlay', true);
       break;
     case 'Escape':
-      ['overview-overlay', 'theme-modal', 'help-overlay'].forEach((id) => toggle(id, false));
+      ['overview-overlay', 'theme-modal', 'help-overlay', 'gslides-modal'].forEach((id) =>
+        toggle(id, false),
+      );
+      $('export-menu').hidden = true;
       break;
   }
 });
