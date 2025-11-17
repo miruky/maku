@@ -5,13 +5,31 @@ export function slideClassName(slide: Slide): string {
   return ['slide', `layout-${slide.layout}`, ...slide.classes].join(' ');
 }
 
+// url('…') の単一引用符や style 属性の二重引用符を抜け出せる文字を
+// パーセントエンコードする。残りの URL 文字(英数や :/.?=#- や base64 の +/=)は素通しする。
+function encodeBgUrl(url: string): string {
+  return url.replace(
+    /['"()\\\s<>&]/g,
+    (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0'),
+  );
+}
+
+// 色・グラデーション値を style 属性に入れるためのHTMLエスケープ。属性からの脱出を防ぐ。
+function escapeAttr(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
 export function slideStyleAttr(slide: Slide): string {
   if (!slide.background) return '';
   const bg = slide.background;
   if (/^(https?:|data:)/.test(bg)) {
-    return ` style="background-image:url('${bg}')" data-bg="image"`;
+    return ` style="background-image:url('${encodeBgUrl(bg)}')" data-bg="image"`;
   }
-  return ` style="background:${bg}"`;
+  return ` style="background:${escapeAttr(bg)}"`;
 }
 
 export function slideInnerHtml(slide: Slide): string {
