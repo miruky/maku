@@ -1,5 +1,6 @@
 import './style.css';
 import { parseDeck } from './deck';
+import { blockToMd } from './edit';
 import { exportPdf, exportPptx } from './export';
 import { slideHtml } from './render';
 import { Presenter } from './present';
@@ -94,6 +95,8 @@ if (!app) throw new Error('#app が見つからない');
 const ICON = {
   edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L18.5 9.5a2.1 2.1 0 0 0-3-3L5 17v3z"/><path d="M13.5 6.5l3 3"/></svg>',
   grid: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="3" width="7" height="7" rx="1.2"/><rect x="14" y="3" width="7" height="7" rx="1.2"/><rect x="3" y="14" width="7" height="7" rx="1.2"/><rect x="14" y="14" width="7" height="7" rx="1.2"/></svg>',
+  inplace:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h9M4 12h6M4 17h7"/><path d="M14.6 14.4l5-5a1.6 1.6 0 0 0-2.3-2.3l-5 5-.6 2.9z"/></svg>',
   notes: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M5 4h14v16H5z"/><path d="M8.5 9h7M8.5 13h7M8.5 17h4"/></svg>',
   play: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M4 4h6v6H4zM4 14h16v6H4zM14 4h6v6h-6z" opacity="0"/><path d="M8 5v14l11-7z"/></svg>',
   pdf: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M8 11l4 4 4-4"/><path d="M5 21h14"/></svg>',
@@ -116,7 +119,8 @@ app.innerHTML = `
     <span class="bar-title" id="bar-title"></span>
     <div class="bar-actions">
       <button class="ico" id="open" data-tip="Markdownを開く" aria-label="Markdownを開く">${ICON.open}</button>
-      <button class="ico" id="edit" data-tip="編集 (E)" aria-label="編集">${ICON.edit}</button>
+      <button class="ico" id="edit" data-tip="Markdownエディタ (E)" aria-label="Markdownエディタ">${ICON.edit}</button>
+      <button class="ico" id="live-edit" data-tip="スライドを直接編集" aria-label="スライドを直接編集">${ICON.inplace}</button>
       <button class="ico" id="overview" data-tip="スライド一覧 (O)" aria-label="スライド一覧">${ICON.grid}</button>
       <button class="ico" id="notes-btn" data-tip="発表者ノートとタイマー (S)" aria-label="発表者ノートとタイマー">${ICON.notes}</button>
       <button class="ico" id="theme-btn" data-tip="テーマを選ぶ (T)" aria-label="テーマを選ぶ">${ICON.theme}</button>
@@ -193,6 +197,7 @@ app.innerHTML = `
         <dt>P</dt><dd>書き出し(PDF / PPTX / Google)</dd>
         <dt>Esc</dt><dd>パネルを閉じる</dd>
       </dl>
+      <p class="help-note">スライド上の文字を直接クリックすると、その場で書き換えられます。編集はMarkdown側にも即座に反映され、左右どちらからでも編集できます(ツールバーの「スライドを直接編集」で切替)。</p>
       <button class="mini" data-close="help-overlay">閉じる</button>
     </div>
   </div>
@@ -297,6 +302,7 @@ const presenter = new Presenter(
   (i) => {
     if (location.hash !== `#${i + 1}`) history.replaceState(null, '', `#${i + 1}${themeQuery()}`);
   },
+  () => decorateStage(),
 );
 
 let currentTheme = themeById(readTheme());
@@ -335,6 +341,120 @@ function rebuild(keepIndex = true): void {
   }
 }
 
+// ── スライド直接編集(view ⇄ md の双方向) ──
+// 描画されたブロックは data-src="開始-終了"(原文の絶対オフセット)を持つ。
+// view側で編集されたら、そのブロックをMarkdownへ戻し、原文の該当範囲を差し替える。
+const LIVE_KEY = 'maku.liveedit';
+let liveEdit = localStorage.getItem(LIVE_KEY) !== 'off';
+let presenting = false;
+let viewDirty = false;
+let editingBlock: HTMLElement | null = null;
+let editStart = 0;
+let editEnd = 0;
+
+function rangeOf(el: HTMLElement): [number, number] {
+  const m = /^(\d+)-(\d+)$/.exec(el.dataset.src ?? '');
+  return m ? [Number(m[1]), Number(m[2])] : [0, 0];
+}
+function setRange(el: HTMLElement, s: number, e: number): void {
+  el.dataset.src = `${s}-${e}`;
+}
+
+// 描画のたびに編集可否を反映する(Presenter から onAfterRender 経由で呼ばれる)。
+function decorateStage(): void {
+  const enable = liveEdit && !presenting;
+  deckRoot.classList.toggle('live', enable);
+  stage.querySelectorAll<HTMLElement>('[data-src]').forEach((block) => {
+    const targets =
+      block.tagName === 'TABLE'
+        ? Array.from(block.querySelectorAll<HTMLElement>('th, td'))
+        : block.tagName === 'PRE'
+          ? Array.from(block.querySelectorAll<HTMLElement>('code'))
+          : [block];
+    for (const t of targets) {
+      if (enable) {
+        t.setAttribute('contenteditable', 'true');
+        t.spellcheck = false;
+      } else {
+        t.removeAttribute('contenteditable');
+      }
+    }
+  });
+}
+
+function persistMd(): void {
+  try {
+    localStorage.setItem(MD_KEY, mdInput.value);
+  } catch {
+    // 保存失敗は無視
+  }
+}
+
+// view側の編集をまだ原文に取り込んでいなければ取り込み、再パースして全体を同期する。
+function flushView(): void {
+  if (!viewDirty) return;
+  viewDirty = false;
+  editingBlock = null;
+  rebuild(true);
+}
+
+stage.addEventListener('focusin', (e) => {
+  if (!liveEdit || presenting) return;
+  const block = (e.target as HTMLElement).closest<HTMLElement>('[data-src]');
+  if (!block) return;
+  editingBlock = block;
+  [editStart, editEnd] = rangeOf(block);
+});
+
+stage.addEventListener('input', () => {
+  if (!editingBlock || !liveEdit) return;
+  const md = blockToMd(editingBlock);
+  const delta = md.length - (editEnd - editStart);
+  const v = mdInput.value;
+  mdInput.value = v.slice(0, editStart) + md + v.slice(editEnd);
+  // 後続ブロックのオフセットを delta ぶんずらし、再描画せずに整合を保つ。
+  stage.querySelectorAll<HTMLElement>('[data-src]').forEach((b) => {
+    if (b === editingBlock) return;
+    const [bs, be] = rangeOf(b);
+    if (bs >= editEnd) setRange(b, bs + delta, be + delta);
+  });
+  setRange(editingBlock, editStart, editStart + md.length);
+  editEnd = editStart + md.length;
+  viewDirty = true;
+  persistMd();
+});
+
+stage.addEventListener('focusout', () => {
+  // 別ブロックへ移動しただけなら再描画しない(キャレットを保つ)。
+  // 編集領域から完全に離れたときだけ原文と同期する。
+  window.setTimeout(() => {
+    if (!stage.contains(document.activeElement)) flushView();
+  }, 120);
+});
+
+function setLiveEdit(on: boolean): void {
+  liveEdit = on;
+  try {
+    localStorage.setItem(LIVE_KEY, on ? 'on' : 'off');
+  } catch {
+    // 保存失敗は無視
+  }
+  $('live-edit').classList.toggle('on', on);
+  decorateStage();
+}
+
+// 発表(全画面)中は直接編集を止める。
+document.addEventListener('fullscreenchange', () => {
+  presenting = !!document.fullscreenElement;
+  decorateStage();
+});
+
+// 移動前に view 側の編集を取り込んでから動かす(Presenter内部のデッキを最新化)。
+function nav(action: () => void): void {
+  flushView();
+  action();
+}
+
 // ── 初期化 ──
 mdInput.value = localStorage.getItem(MD_KEY) ?? SAMPLE;
 setTheme(currentTheme.id, false);
@@ -352,10 +472,14 @@ rebuild(false);
 }
 
 // ── ナビ ──
-$('next').addEventListener('click', () => presenter.next());
-$('prev').addEventListener('click', () => presenter.prev());
+$('next').addEventListener('click', () => nav(() => presenter.next()));
+$('prev').addEventListener('click', () => nav(() => presenter.prev()));
 
 mdInput.addEventListener('input', () => rebuild(true));
+
+// 直接編集トグル(既定はオン)。
+$('live-edit').classList.toggle('on', liveEdit);
+$('live-edit').addEventListener('click', () => setLiveEdit(!liveEdit));
 
 // ── パネル開閉 ──
 function toggle(id: string, force?: boolean): void {
@@ -523,7 +647,7 @@ function buildOverview(): void {
     cell.className = 'ov-cell';
     cell.innerHTML = `<div class="ov-thumb">${slideHtml(s)}</div><span class="ov-no">${i + 1}</span>`;
     cell.addEventListener('click', () => {
-      presenter.go(i);
+      nav(() => presenter.go(i));
       toggle('overview-overlay', false);
     });
     grid.appendChild(cell);
@@ -582,22 +706,22 @@ $('timer-reset').addEventListener('click', () => {
 // ── キーボード ──
 window.addEventListener('keydown', (ev) => {
   const target = ev.target as HTMLElement;
-  if (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT') return;
+  if (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT' || target.isContentEditable) return;
   if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
   switch (ev.key) {
     case 'ArrowRight':
     case ' ':
       ev.preventDefault();
-      presenter.next();
+      nav(() => presenter.next());
       break;
     case 'ArrowLeft':
-      presenter.prev();
+      nav(() => presenter.prev());
       break;
     case 'Home':
-      presenter.go(0);
+      nav(() => presenter.go(0));
       break;
     case 'End':
-      presenter.go(presenter.total - 1);
+      nav(() => presenter.go(presenter.total - 1));
       break;
     case 'f':
     case 'F':
@@ -644,8 +768,8 @@ deckRoot.addEventListener(
   'touchend',
   (e) => {
     const dx = e.changedTouches[0]!.clientX - touchX;
-    if (dx < -50) presenter.next();
-    else if (dx > 50) presenter.prev();
+    if (dx < -50) nav(() => presenter.next());
+    else if (dx > 50) nav(() => presenter.prev());
   },
   { passive: true },
 );

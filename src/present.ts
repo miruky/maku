@@ -1,6 +1,6 @@
 import type { Deck, Slide } from './deck';
 import { renderMarkdown } from './markdown';
-import { slideHtml } from './render';
+import { slideHtmlMapped } from './render';
 
 export interface PresenterEls {
   stage: HTMLElement;
@@ -18,6 +18,7 @@ export class Presenter {
   constructor(
     private readonly els: PresenterEls,
     private readonly onChange?: (index: number) => void,
+    private readonly onAfterRender?: () => void,
   ) {}
 
   get index(): number {
@@ -84,7 +85,7 @@ export class Presenter {
     this.els.stage.classList.remove('enter');
     void this.els.stage.offsetWidth;
     this.els.stage.innerHTML = slide
-      ? slideHtml(slide)
+      ? slideHtmlMapped(slide)
       : '<div class="slide"><div class="slide-body"><p class="empty">スライドがありません</p></div></div>';
     this.els.stage.classList.add('enter');
 
@@ -96,5 +97,6 @@ export class Presenter {
       ? renderMarkdown(slide.notes)
       : '<p class="notes-empty">このスライドにノートはありません</p>';
     this.onChange?.(this.idx);
+    this.onAfterRender?.();
   }
 }

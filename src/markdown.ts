@@ -27,6 +27,9 @@ export function inline(text: string): string {
 interface Cursor {
   lines: string[];
   i: number;
+  // 指定時、トップレベルの各ブロックに data-src="start-end"(文書中の絶対オフセット)を付ける。
+  // view側で編集したブロックを、Markdown原文の正しい範囲へ書き戻すための逆引きに使う。
+  offsets?: number[];
 }
 
 const LIST_RE = /^(\s*)([-*+]|\d+\.)\s+(.*)$/;
@@ -41,6 +44,16 @@ export function renderMarkdown(src: string): string {
   return blocks(cur, 0);
 }
 
+// 絶対オフセット付きの行配列から描画し、トップレベルのブロックに data-src を付ける版。
+export function renderMarkdownMapped(src: { text: string; offset: number }[]): string {
+  const cur: Cursor = {
+    lines: src.map((l) => l.text),
+    offsets: src.map((l) => l.offset),
+    i: 0,
+  };
+  return blocks(cur, 0);
+}
+
 // minIndent 以上のインデントを持つブロック列を読む(入れ子リスト用)。
 function blocks(cur: Cursor, minIndent: number): string {
   const out: string[] = [];
@@ -52,38 +65,48 @@ function blocks(cur: Cursor, minIndent: number): string {
     }
     if (indentOf(line) < minIndent) break;
 
+    const startLine = cur.i;
+    let piece: string;
+
     const fence = /^(\s*)(```|~~~)\s*([\w-]*)\s*$/.exec(line);
-    if (fence) {
-      out.push(codeBlock(cur, fence[2]!, fence[3] ?? ''));
-      continue;
-    }
     const heading = /^(#{1,6})\s+(.*)$/.exec(line);
-    if (heading) {
+    if (fence) {
+      piece = codeBlock(cur, fence[2]!, fence[3] ?? '');
+    } else if (heading) {
       const level = heading[1]!.length;
-      out.push(`<h${level}>${inline(escapeHtml(heading[2]!.trim()))}</h${level}>`);
+      piece = `<h${level}>${inline(escapeHtml(heading[2]!.trim()))}</h${level}>`;
       cur.i += 1;
-      continue;
-    }
-    if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) {
-      out.push('<hr />');
+    } else if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) {
+      piece = '<hr />';
       cur.i += 1;
-      continue;
+    } else if (/^\s*>\s?/.test(line)) {
+      piece = blockquote(cur);
+    } else if (LIST_RE.test(line)) {
+      piece = list(cur, indentOf(line));
+    } else if (isTableStart(cur)) {
+      piece = table(cur);
+    } else {
+      piece = paragraph(cur, minIndent);
     }
-    if (/^\s*>\s?/.test(line)) {
-      out.push(blockquote(cur));
-      continue;
-    }
-    if (LIST_RE.test(line)) {
-      out.push(list(cur, indentOf(line)));
-      continue;
-    }
-    if (isTableStart(cur)) {
-      out.push(table(cur));
-      continue;
-    }
-    out.push(paragraph(cur, minIndent));
+
+    // トップレベル(offsets あり)のときだけ、ブロックの元ソース範囲を埋め込む。
+    // 入れ子(blockquote 内など)は offsets を持たないので付かない。
+    if (cur.offsets) piece = withSource(piece, cur, startLine);
+    out.push(piece);
   }
   return out.join('\n');
+}
+
+// 1ブロックが消費した行(末尾の空行は除く)の絶対範囲を、最初のタグに data-src として付ける。
+function withSource(html: string, cur: Cursor, startLine: number): string {
+  const offsets = cur.offsets!;
+  let endLine = cur.i;
+  while (endLine > startLine && cur.lines[endLine - 1]!.trim() === '') endLine -= 1;
+  if (endLine <= startLine) return html;
+  const last = endLine - 1;
+  const start = offsets[startLine]!;
+  const end = offsets[last]! + cur.lines[last]!.length;
+  return html.replace(/^(\s*<[a-zA-Z][\w-]*)/, `$1 data-src="${start}-${end}"`);
 }
 
 function codeBlock(cur: Cursor, mark: string, lang: string): string {
