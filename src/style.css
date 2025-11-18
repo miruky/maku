@@ -29,6 +29,14 @@
   --r-md: 10px;
   --r-lg: 14px;
 
+  /* UIクロムのタイプスケール(本文13-14pxを基準に上下へ)。 */
+  --ts-kicker: 11px;
+  --ts-sm: 12px;
+  --ts-base: 14px;
+  --ts-md: 15px;
+  --ts-lg: 18px;
+  --ts-xl: 22px;
+
   /* 影は被写体(スライド面・浮く小窓)だけに、薄く絞って使う。 */
   --shadow-deck: 0 1px 2px rgba(30, 27, 20, 0.05), 0 18px 38px -24px rgba(30, 27, 20, 0.4);
   --shadow-pop: 0 1px 2px rgba(30, 27, 20, 0.06), 0 14px 30px -18px rgba(30, 27, 20, 0.34);
@@ -280,7 +288,7 @@ body {
 .slide-body {
   font-family: var(--body-font);
   font-size: 3.5cqh;
-  line-height: 1.6;
+  line-height: 1.7;
   width: 100%;
 }
 
@@ -314,6 +322,7 @@ body {
 .slide h1 {
   font-size: 2.1em;
   margin-bottom: 0.4em;
+  letter-spacing: -0.005em;
 }
 
 .slide h2 {
@@ -483,6 +492,7 @@ body {
 
 .layout-title h1 {
   font-size: 3em;
+  letter-spacing: -0.015em;
 }
 
 .layout-title h2 {
@@ -675,31 +685,65 @@ body {
 .overlay-head {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 16px 22px;
+  gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-5);
   border-bottom: 1px solid var(--ui-line);
+}
+
+.head-titles {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-right: auto;
+}
+
+.kicker {
+  font-size: var(--ts-kicker);
   font-weight: 600;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--ui-accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.head-title {
+  font-size: var(--ts-lg);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  line-height: 1.1;
+}
+
+.head-sub {
+  font-size: var(--ts-sm);
+  font-weight: 500;
+  color: var(--ui-soft);
+  letter-spacing: 0.02em;
+  margin-left: 6px;
 }
 
 .overlay-head input {
-  margin-left: auto;
   font: inherit;
-  font-size: 13px;
-  padding: 7px 12px;
+  font-size: var(--ts-sm);
+  padding: 8px 12px;
   border: 1px solid var(--ui-line);
-  border-radius: 8px;
-  background: var(--ui-panel);
+  border-radius: var(--r-sm);
+  background: var(--ui-bg);
   color: var(--ui-ink);
+}
+
+.overlay-head input:focus-visible {
+  border-color: var(--ui-accent);
+  outline-offset: 1px;
 }
 
 /* 一覧 */
 .overview-grid {
   flex: 1;
   overflow: auto;
-  padding: 22px;
+  padding: var(--sp-5);
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 18px;
+  gap: var(--sp-4);
 }
 
 .ov-cell {
@@ -747,10 +791,10 @@ body {
 .theme-grid {
   flex: 1;
   overflow: auto;
-  padding: 22px;
+  padding: var(--sp-5);
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 14px;
+  gap: var(--sp-4);
 }
 
 .th-cell {
@@ -799,8 +843,9 @@ body {
 
 .th-name {
   display: block;
-  margin-top: 8px;
-  font-size: 12px;
+  margin-top: var(--sp-2);
+  font-size: var(--ts-sm);
+  letter-spacing: 0.02em;
   color: var(--ui-soft);
 }
 
@@ -819,9 +864,15 @@ body {
   width: 90%;
 }
 
+.help-card .kicker {
+  display: block;
+  margin-bottom: 4px;
+}
+
 .help-card h2 {
-  font-size: 18px;
-  margin-bottom: 16px;
+  font-size: var(--ts-xl);
+  letter-spacing: -0.01em;
+  margin-bottom: var(--sp-4);
 }
 
 .help-card dl {
