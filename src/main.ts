@@ -155,13 +155,22 @@ app.innerHTML = `
   </div>
 
   <div class="overlay" id="overview-overlay" hidden>
-    <div class="overlay-head"><span>スライド一覧</span><button class="mini" data-close="overview-overlay">閉じる</button></div>
+    <div class="overlay-head">
+      <div class="head-titles">
+        <span class="kicker">Gallery</span>
+        <span class="head-title">スライド一覧</span>
+      </div>
+      <button class="mini" data-close="overview-overlay">閉じる</button>
+    </div>
     <div class="overview-grid" id="overview-grid"></div>
   </div>
 
   <div class="overlay modal" id="theme-modal" hidden>
     <div class="overlay-head">
-      <span>テーマ(100種類)</span>
+      <div class="head-titles">
+        <span class="kicker">Theme</span>
+        <span class="head-title">テーマ<span class="head-sub">100種類</span></span>
+      </div>
       <input id="theme-search" type="search" placeholder="色名で絞り込み" aria-label="テーマ検索" />
       <button class="mini" data-close="theme-modal">閉じる</button>
     </div>
@@ -170,6 +179,7 @@ app.innerHTML = `
 
   <div class="overlay help" id="help-overlay" hidden>
     <div class="help-card">
+      <span class="kicker">Shortcuts</span>
       <h2>キー操作</h2>
       <dl>
         <dt>→ / Space</dt><dd>次へ(段階表示も進む)</dd>
@@ -209,6 +219,7 @@ app.innerHTML = `
 
   <div class="overlay help" id="gslides-modal" hidden>
     <div class="help-card">
+      <span class="kicker">Export</span>
       <h2>Google スライドで開く</h2>
       <p class="gs-lead">.pptx を書き出しました。次の手順で Google スライドの編集可能なファイルになります。</p>
       <ol class="gs-steps">
