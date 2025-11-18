@@ -1,5 +1,5 @@
 import type { Slide } from './deck';
-import { renderMarkdown } from './markdown';
+import { renderMarkdown, renderMarkdownMapped } from './markdown';
 
 export function slideClassName(slide: Slide): string {
   return ['slide', `layout-${slide.layout}`, ...slide.classes].join(' ');
@@ -45,6 +45,25 @@ export function slideHtml(slide: Slide): string {
   return (
     `<div class="${slideClassName(slide)}"${slideStyleAttr(slide)}>` +
     `<div class="slide-body">${slideInnerHtml(slide)}</div>` +
+    `</div>`
+  );
+}
+
+// 編集ステージ用。各ブロックに data-src(元ソースの範囲)を付けて描画する。
+export function slideInnerHtmlMapped(slide: Slide): string {
+  if (slide.layout === 'split' && slide.columnLines && slide.columnLines.length > 0) {
+    const cols = slide.columnLines
+      .map((ls) => `<div class="col">${renderMarkdownMapped(ls)}</div>`)
+      .join('');
+    return `<div class="columns">${cols}</div>`;
+  }
+  return renderMarkdownMapped(slide.bodyLines);
+}
+
+export function slideHtmlMapped(slide: Slide): string {
+  return (
+    `<div class="${slideClassName(slide)}"${slideStyleAttr(slide)}>` +
+    `<div class="slide-body">${slideInnerHtmlMapped(slide)}</div>` +
     `</div>`
   );
 }
