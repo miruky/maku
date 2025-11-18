@@ -435,16 +435,32 @@ body {
 .slide table {
   border-collapse: collapse;
   font-size: 0.9em;
+  width: fit-content;
+  max-width: 100%;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 0 0 1px var(--rule);
 }
 
 .slide th,
 .slide td {
-  border: 1px solid var(--rule);
-  padding: 0.4em 0.8em;
+  padding: 0.55em 1.1em;
+  text-align: left;
+  border-bottom: 1px solid var(--rule);
 }
 
 .slide thead th {
-  background: var(--code-bg, rgba(127, 127, 127, 0.1));
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  font-weight: 700;
+  border-bottom: 2px solid color-mix(in srgb, var(--accent) 55%, var(--rule));
+}
+
+.slide tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.slide tbody tr:nth-child(even) td {
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
 }
 
 .slide img {
@@ -482,9 +498,17 @@ body {
   text-align: center;
 }
 
-.layout-center p,
-.layout-center ul,
-.layout-center ol,
+/* 中央寄せレイアウトでも、本文ブロックは「左揃えのまま中央に配置」する。
+   箇条書きの行頭が揃って読みやすく、美しく見える。 */
+.layout-center :is(p, ul, ol, blockquote, table) {
+  width: fit-content;
+  max-width: 100%;
+  margin-left: auto;
+  margin-right: auto;
+  text-align: left;
+}
+
+/* タイトルレイアウトの副題などは中央のまま。 */
 .layout-title p {
   margin-left: auto;
   margin-right: auto;
@@ -506,6 +530,22 @@ body {
 
 .layout-full .slide-body {
   height: 100%;
+}
+
+/* スライドを直接編集(view ⇄ md の双方向)。編集できる箇所をホバー/フォーカスで示す。 */
+.deck-root.live [contenteditable] {
+  border-radius: 6px;
+  cursor: text;
+  transition: box-shadow 0.15s var(--ease);
+}
+
+.deck-root.live [contenteditable]:hover {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.deck-root.live [contenteditable]:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent);
 }
 
 /* 背景画像つきスライドは陰を敷いて文字を読みやすく */
@@ -888,6 +928,15 @@ body {
 }
 
 .help-card dd {
+  color: var(--ui-soft);
+}
+
+.help-note {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--ui-line);
+  font-size: 13px;
+  line-height: 1.7;
   color: var(--ui-soft);
 }
 
