@@ -1,6 +1,16 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="makuのロゴ">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="maku">
   <title>maku</title>
-  <rect x="7" y="16" width="40" height="26" rx="4" fill="none" stroke="#7c8b9a" stroke-width="3" opacity="0.6" transform="translate(10 6)" />
-  <rect x="7" y="13" width="40" height="26" rx="4" fill="none" stroke="#3b5bdb" stroke-width="3.5" />
-  <path d="M24 22v8l7-4z" fill="#3b5bdb" />
+  <style>
+    .card-back { stroke: #232019; opacity: 0.28; }
+    .card-front { stroke: #3a4cbf; }
+    .play { fill: #3a4cbf; }
+    @media (prefers-color-scheme: dark) {
+      .card-back { stroke: #ece7dc; }
+      .card-front { stroke: #99a4ff; }
+      .play { fill: #99a4ff; }
+    }
+  </style>
+  <rect class="card-back" x="20" y="24" width="30" height="20" rx="4" fill="none" stroke-width="3" />
+  <rect class="card-front" x="14" y="18" width="30" height="20" rx="4" fill="none" stroke-width="3.5" />
+  <path class="play" d="M25 23 25 33 34 28Z" />
 </svg>
