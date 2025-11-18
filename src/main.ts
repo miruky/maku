@@ -105,7 +105,14 @@ const ICON = {
 
 app.innerHTML = `
   <header class="bar">
-    <span class="logo">maku</span>
+    <span class="logo">
+      <svg class="logo-mark" viewBox="0 0 64 64" aria-hidden="true" fill="none" stroke="currentColor">
+        <rect class="card-back" x="20" y="24" width="30" height="20" rx="4" stroke-width="3" />
+        <rect x="14" y="18" width="30" height="20" rx="4" stroke-width="3.5" />
+        <path class="play" d="M25 23 25 33 34 28Z" fill="currentColor" stroke="none" />
+      </svg>
+      <span class="logo-word">maku</span>
+    </span>
     <span class="bar-title" id="bar-title"></span>
     <div class="bar-actions">
       <button class="ico" id="open" data-tip="Markdownを開く" aria-label="Markdownを開く">${ICON.open}</button>
@@ -191,7 +198,13 @@ app.innerHTML = `
   <input type="file" id="file" accept=".md,.markdown,.txt,text/markdown,text/plain" hidden />
 
   <div class="busy" id="busy" hidden>
-    <div class="busy-card"><span class="spinner" aria-hidden="true"></span><span id="busy-text">書き出し中…</span></div>
+    <div class="busy-card">
+      <span id="busy-text">書き出し中…</span>
+      <div class="busy-track" id="busy-track" role="progressbar" aria-valuemin="0" aria-valuenow="0" aria-valuemax="0">
+        <span class="busy-fill" id="busy-fill"></span>
+      </div>
+      <span class="busy-count" id="busy-count"></span>
+    </div>
   </div>
 
   <div class="overlay help" id="gslides-modal" hidden>
@@ -394,8 +407,9 @@ async function runExport(kind: string): Promise<void> {
     toast('Markdown を保存しました');
     return;
   }
-  setBusy(true, '書き出し中…');
-  const onProgress = (done: number, total: number): void => setBusy(true, `書き出し中… ${done} / ${total}`);
+  const total = deck.slides.length;
+  setBusy(true, '書き出し中…', 0, total);
+  const onProgress = (done: number, t: number): void => setBusy(true, '書き出し中…', done, t);
   try {
     if (kind === 'pdf') {
       await exportPdf(deck, currentTheme, onProgress);
@@ -421,9 +435,17 @@ function doPrint(): void {
   window.print();
 }
 
-function setBusy(show: boolean, text = ''): void {
+function setBusy(show: boolean, text = '', done = 0, total = 0): void {
   $('busy').hidden = !show;
-  if (show) $('busy-text').textContent = text;
+  if (!show) return;
+  $('busy-text').textContent = text;
+  const track = $('busy-track');
+  const fill = $<HTMLElement>('busy-fill');
+  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+  fill.style.width = `${pct}%`;
+  track.setAttribute('aria-valuenow', String(done));
+  track.setAttribute('aria-valuemax', String(total));
+  $('busy-count').textContent = total > 0 ? `${done} / ${total}` : '';
 }
 
 function toast(message: string): void {
