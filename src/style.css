@@ -121,6 +121,42 @@ body {
   color: #fff;
 }
 
+.tip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 60;
+  max-width: 280px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--ui-ink);
+  color: var(--ui-bg);
+  font-size: 12px;
+  line-height: 1.3;
+  white-space: nowrap;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-4px);
+  transition:
+    opacity 0.14s var(--ease),
+    transform 0.14s var(--ease);
+  pointer-events: none;
+}
+
+.tip.show {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tip {
+    transition: opacity 0.14s var(--ease);
+    transform: none;
+  }
+}
+
 /* ── 作業領域 ── */
 
 .work {

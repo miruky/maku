@@ -108,15 +108,15 @@ app.innerHTML = `
     <span class="logo">maku</span>
     <span class="bar-title" id="bar-title"></span>
     <div class="bar-actions">
-      <button class="ico" id="open" title="Markdownを開く">${ICON.open}</button>
-      <button class="ico" id="edit" title="編集 (E)">${ICON.edit}</button>
-      <button class="ico" id="overview" title="一覧 (O)">${ICON.grid}</button>
-      <button class="ico" id="notes-btn" title="ノートと発表者タイマー (S)">${ICON.notes}</button>
-      <button class="ico" id="theme-btn" title="テーマ (T)">${ICON.theme}</button>
-      <button class="ico" id="export" title="書き出し (P)">${ICON.pdf}</button>
-      <button class="ico" id="share" title="リンクをコピー">${ICON.share}</button>
-      <button class="ico" id="present" title="全画面 (F)">${ICON.play}</button>
-      <button class="ico" id="help-btn" title="ヘルプ (?)">${ICON.help}</button>
+      <button class="ico" id="open" data-tip="Markdownを開く" aria-label="Markdownを開く">${ICON.open}</button>
+      <button class="ico" id="edit" data-tip="編集 (E)" aria-label="編集">${ICON.edit}</button>
+      <button class="ico" id="overview" data-tip="スライド一覧 (O)" aria-label="スライド一覧">${ICON.grid}</button>
+      <button class="ico" id="notes-btn" data-tip="発表者ノートとタイマー (S)" aria-label="発表者ノートとタイマー">${ICON.notes}</button>
+      <button class="ico" id="theme-btn" data-tip="テーマを選ぶ (T)" aria-label="テーマを選ぶ">${ICON.theme}</button>
+      <button class="ico" id="export" data-tip="書き出し: PDF / PPTX / Google (P)" aria-label="書き出し">${ICON.pdf}</button>
+      <button class="ico" id="share" data-tip="共有リンクをコピー" aria-label="共有リンクをコピー">${ICON.share}</button>
+      <button class="ico" id="present" data-tip="全画面で発表 (F)" aria-label="全画面で発表">${ICON.play}</button>
+      <button class="ico" id="help-btn" data-tip="ヘルプ (?)" aria-label="ヘルプ">${ICON.help}</button>
     </div>
   </header>
 
@@ -222,6 +222,52 @@ const stage = $('stage');
 const mdInput = $<HTMLTextAreaElement>('md');
 const barTitle = $('bar-title');
 
+// ツールバーはアイコンのみなので、ホバー/フォーカスで役割を示すツールチップを出す。
+// 端のボタンでも見切れないよう、JSで左右をビューポート内にクランプして配置する。
+const tip = document.createElement('div');
+tip.className = 'tip';
+tip.setAttribute('role', 'tooltip');
+document.body.appendChild(tip);
+let tipTimer = 0;
+
+function placeTip(btn: HTMLElement): void {
+  const label = btn.dataset.tip;
+  if (!label) return;
+  tip.textContent = label;
+  const b = btn.getBoundingClientRect();
+  const t = tip.getBoundingClientRect();
+  const left = Math.min(Math.max(8, b.left + b.width / 2 - t.width / 2), window.innerWidth - t.width - 8);
+  tip.style.left = `${Math.round(left)}px`;
+  tip.style.top = `${Math.round(b.bottom + 8)}px`;
+  tip.classList.add('show');
+}
+
+function hideTip(): void {
+  window.clearTimeout(tipTimer);
+  tip.classList.remove('show');
+}
+
+const barActions = app.querySelector<HTMLElement>('.bar-actions')!;
+barActions.addEventListener('pointerover', (e) => {
+  const btn = (e.target as HTMLElement).closest<HTMLElement>('.ico');
+  if (!btn) return;
+  window.clearTimeout(tipTimer);
+  tipTimer = window.setTimeout(() => placeTip(btn), 90);
+});
+barActions.addEventListener('pointerout', (e) => {
+  const to = e.relatedTarget as HTMLElement | null;
+  if (to && to.closest('.ico')) return;
+  hideTip();
+});
+barActions.addEventListener('focusin', (e) => {
+  const btn = (e.target as HTMLElement).closest<HTMLElement>('.ico');
+  if (btn) placeTip(btn);
+});
+barActions.addEventListener('focusout', hideTip);
+barActions.addEventListener('click', hideTip);
+window.addEventListener('scroll', hideTip, true);
+window.addEventListener('resize', hideTip);
+
 const presenter = new Presenter(
   { stage, progress: $('progress'), counter: $('counter'), notes: $('notes-body') },
   (i) => {
@@ -294,6 +340,9 @@ function toggle(id: string, force?: boolean): void {
   if (id === 'editor') $('edit').classList.toggle('on', !el.hidden);
 }
 $('edit').addEventListener('click', () => toggle('editor'));
+// 既定で編集パネルを開いておく。横並びで原稿とプレビューを見渡せて書き始めやすい。
+// 狭い画面では編集がスライド全面を覆うので、その場合だけ閉じたままにする。
+if (window.matchMedia('(min-width: 821px)').matches) toggle('editor', true);
 $('notes-btn').addEventListener('click', () => toggle('notes-panel'));
 $('overview').addEventListener('click', () => {
   buildOverview();
