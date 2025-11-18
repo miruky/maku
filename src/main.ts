@@ -645,6 +645,7 @@ function buildOverview(): void {
   deck.slides.forEach((s, i) => {
     const cell = document.createElement('button');
     cell.className = 'ov-cell';
+    cell.style.setProperty('--i', String(i));
     cell.innerHTML = `<div class="ov-thumb">${slideHtml(s)}</div><span class="ov-no">${i + 1}</span>`;
     cell.addEventListener('click', () => {
       nav(() => presenter.go(i));
