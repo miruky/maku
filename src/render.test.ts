@@ -22,6 +22,19 @@ describe('render', () => {
     expect(img).toContain('data-bg="image"');
   });
 
+  it('背景URLの引用符・括弧はエスケープしてurl()から抜け出せない', () => {
+    const out = slideStyleAttr(slide("<!-- bg: https://e.com/a.jpg')url('x -->\n# x"));
+    expect(out).not.toMatch(/url\('https:\/\/e\.com\/a\.jpg'\)/);
+    expect(out).toContain('%27'); // ' がエンコードされている
+    expect(out).not.toContain("')url('");
+  });
+
+  it('色背景のダブルクオートはエスケープして属性から抜け出せない', () => {
+    const out = slideStyleAttr(slide('<!-- bg: red"><img src=x -->\n# x'));
+    expect(out).not.toContain('"><img');
+    expect(out).toContain('&quot;');
+  });
+
   it('split は段組のcolを出す', () => {
     const html = slideHtml(slide('<!-- layout: split -->\n左\n===\n右'));
     expect((html.match(/class="col"/g) ?? []).length).toBe(2);
