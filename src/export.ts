@@ -1,5 +1,6 @@
 import type { Deck } from './deck';
-import { slideHtml } from './render';
+import { applyOverlay, slideOverlay, type Overlay } from './overlay';
+import { slideHtmlMapped } from './render';
 import { applyTheme, type Theme } from './themes';
 
 // 書き出しは「見た目そのまま」を最優先する。各スライドを実寸(1280×720)で
@@ -28,6 +29,7 @@ async function renderSlideCanvas(
   theme: Theme,
   index: number,
   html2canvas: Html2Canvas,
+  overlay?: Overlay,
 ): Promise<HTMLCanvasElement> {
   const holder = document.createElement('div');
   holder.style.cssText = `position:fixed;left:-99999px;top:0;width:${W}px;height:${H}px;pointer-events:none;`;
@@ -36,7 +38,10 @@ async function renderSlideCanvas(
   applyTheme(root, theme);
   const bg = theme.vars['--bg'] ?? '#ffffff';
   root.style.background = bg;
-  root.innerHTML = slideHtml(deck.slides[index]!);
+  root.innerHTML = slideHtmlMapped(deck.slides[index]!);
+  // 自由配置・図形(overlay)も書き出しに反映する。
+  const slide = root.querySelector('.slide');
+  if (overlay && slide) applyOverlay(slide, slideOverlay(overlay, index));
   holder.appendChild(root);
   document.body.appendChild(holder);
   try {
@@ -58,13 +63,18 @@ export interface ExportProgress {
   (done: number, total: number): void;
 }
 
-export async function exportPdf(deck: Deck, theme: Theme, onProgress?: ExportProgress): Promise<void> {
+export async function exportPdf(
+  deck: Deck,
+  theme: Theme,
+  onProgress?: ExportProgress,
+  overlay?: Overlay,
+): Promise<void> {
   if (deck.slides.length === 0) return;
   const [h2c, jspdf] = await Promise.all([import('html2canvas'), import('jspdf')]);
   const html2canvas = h2c.default as unknown as Html2Canvas;
   const pdf = new jspdf.jsPDF({ orientation: 'landscape', unit: 'px', format: [W, H] });
   for (let i = 0; i < deck.slides.length; i += 1) {
-    const canvas = await renderSlideCanvas(deck, theme, i, html2canvas);
+    const canvas = await renderSlideCanvas(deck, theme, i, html2canvas, overlay);
     if (i > 0) pdf.addPage([W, H], 'landscape');
     pdf.addImage(canvas.toDataURL('image/jpeg', 0.94), 'JPEG', 0, 0, W, H);
     onProgress?.(i + 1, deck.slides.length);
@@ -72,7 +82,12 @@ export async function exportPdf(deck: Deck, theme: Theme, onProgress?: ExportPro
   pdf.save(`${deckFilename(deck.meta)}.pdf`);
 }
 
-export async function exportPptx(deck: Deck, theme: Theme, onProgress?: ExportProgress): Promise<void> {
+export async function exportPptx(
+  deck: Deck,
+  theme: Theme,
+  onProgress?: ExportProgress,
+  overlay?: Overlay,
+): Promise<void> {
   if (deck.slides.length === 0) return;
   const [h2c, pptxMod] = await Promise.all([import('html2canvas'), import('pptxgenjs')]);
   const html2canvas = h2c.default as unknown as Html2Canvas;
@@ -83,7 +98,7 @@ export async function exportPptx(deck: Deck, theme: Theme, onProgress?: ExportPr
   pres.author = 'maku';
   if (deck.meta.title) pres.title = deck.meta.title;
   for (let i = 0; i < deck.slides.length; i += 1) {
-    const canvas = await renderSlideCanvas(deck, theme, i, html2canvas);
+    const canvas = await renderSlideCanvas(deck, theme, i, html2canvas, overlay);
     const slide = pres.addSlide();
     slide.addImage({ data: canvas.toDataURL('image/png'), x: 0, y: 0, w: '100%', h: '100%' });
     const notes = deck.slides[i]!.notes;
