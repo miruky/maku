@@ -1,7 +1,7 @@
 import './style.css';
 import { parseDeck } from './deck';
 import { blockToMd } from './edit';
-import { exportPdf, exportPptx } from './export';
+import { deckFilename, exportPdf, exportPptx, renderSlidePng, slideImageName } from './export';
 import {
   applyOverlay,
   clampBox,
@@ -219,6 +219,7 @@ app.innerHTML = `
     <button data-export="pdf">PDF を書き出す</button>
     <button data-export="pptx">PowerPoint (.pptx)</button>
     <button data-export="gslides">Google スライド用に書き出す</button>
+    <button data-export="png">現在のスライドを画像で保存 (.png)</button>
     <button data-export="md">Markdown を保存</button>
     <button data-export="print">ブラウザで印刷</button>
   </div>
@@ -917,8 +918,22 @@ async function runExport(kind: string): Promise<void> {
     return;
   }
   if (kind === 'md') {
-    download(`${deck.meta.title || 'slides'}.md`, mdInput.value, 'text/markdown');
+    download(`${deckFilename(deck.meta)}.md`, mdInput.value, 'text/markdown');
     toast('Markdown を保存しました');
+    return;
+  }
+  if (kind === 'png') {
+    setBusy(true, '画像を作成中…', 0, 1);
+    try {
+      const dataUrl = await renderSlidePng(deck, currentTheme, presenter.index, overlay);
+      downloadDataUrl(slideImageName(deck.meta, presenter.index), dataUrl);
+      toast('現在のスライドを画像で保存しました');
+    } catch (err) {
+      toast('画像の書き出しに失敗しました(外部画像はCORSで取り込めないことがあります)');
+      console.error(err);
+    } finally {
+      setBusy(false);
+    }
     return;
   }
   const total = deck.slides.length;
@@ -981,6 +996,13 @@ function download(name: string, text: string, type: string): void {
   a.download = name;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+function downloadDataUrl(name: string, dataUrl: string): void {
+  const a = document.createElement('a');
+  a.href = dataUrl;
+  a.download = name;
+  a.click();
 }
 
 // ── Markdownファイルを開く / ドロップ ──

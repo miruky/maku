@@ -22,6 +22,11 @@ export function deckFilename(meta: Record<string, string>): string {
   return slug || 'slides';
 }
 
+// 単一スライド画像のファイル名。番号はゼロ埋めして並び順を保つ。
+export function slideImageName(meta: Record<string, string>, index: number): string {
+  return `${deckFilename(meta)}-${String(index + 1).padStart(2, '0')}.png`;
+}
+
 type Html2Canvas = (el: HTMLElement, opts?: Record<string, unknown>) => Promise<HTMLCanvasElement>;
 
 async function renderSlideCanvas(
@@ -80,6 +85,21 @@ export async function exportPdf(
     onProgress?.(i + 1, deck.slides.length);
   }
   pdf.save(`${deckFilename(deck.meta)}.pdf`);
+}
+
+// 現在のスライド1枚をPNGのdataURLにして返す。保存はUI側に任せる。
+export async function renderSlidePng(
+  deck: Deck,
+  theme: Theme,
+  index: number,
+  overlay?: Overlay,
+): Promise<string> {
+  const slide = deck.slides[index];
+  if (!slide) throw new Error('スライドがありません');
+  const h2c = await import('html2canvas');
+  const html2canvas = h2c.default as unknown as Html2Canvas;
+  const canvas = await renderSlideCanvas(deck, theme, index, html2canvas, overlay);
+  return canvas.toDataURL('image/png');
 }
 
 export async function exportPptx(
