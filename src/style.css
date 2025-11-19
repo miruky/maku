@@ -538,20 +538,169 @@ body {
   height: 100%;
 }
 
-/* スライドを直接編集(view ⇄ md の双方向)。編集できる箇所をホバー/フォーカスで示す。 */
-.deck-root.live [contenteditable] {
+/* スライドを直接編集(PowerPoint風の自由配置 + view ⇄ md 双方向)。 */
+
+/* 編集モードでは、ブロックはクリックで選択・ドラッグで移動できる。 */
+.deck-root.live .slide-body > [data-src] {
+  cursor: pointer;
   border-radius: 6px;
+}
+
+.deck-root.live .slide-body > [data-src]:hover {
+  box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+/* 自由配置されたブロック(位置上書きあり)。 */
+.slide-body > [data-src].ov-placed {
+  margin: 0;
+  z-index: 1;
+}
+
+/* 文字編集中(contenteditable)はテキストカーソルとリングを出す。 */
+.deck-root.editing [contenteditable] {
   cursor: text;
-  transition: box-shadow 0.15s var(--ease);
+  border-radius: 6px;
 }
 
-.deck-root.live [contenteditable]:hover {
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent);
-}
-
-.deck-root.live [contenteditable]:focus {
+.deck-root.editing [contenteditable]:focus {
   outline: none;
   box-shadow: 0 0 0 2px var(--accent);
+}
+
+/* 図形レイヤ。スライド全面に重ね、図形だけがクリックを受ける。 */
+.ov-shapes {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.ov-shape {
+  position: absolute;
+  color: var(--accent);
+  pointer-events: none;
+}
+
+.ov-shape svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.deck-root.live .ov-shape {
+  pointer-events: auto;
+  cursor: move;
+}
+
+/* 選択枠と8方向のハンドル。 */
+.sel-frame {
+  position: absolute;
+  z-index: 8;
+  pointer-events: none;
+  outline: 1.5px solid var(--ui-accent);
+  outline-offset: 1px;
+}
+
+.sel-h {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  background: var(--ui-panel);
+  border: 1.5px solid var(--ui-accent);
+  border-radius: 2px;
+  pointer-events: auto;
+}
+
+.sel-nw {
+  left: -5px;
+  top: -5px;
+  cursor: nwse-resize;
+}
+.sel-n {
+  left: calc(50% - 5px);
+  top: -5px;
+  cursor: ns-resize;
+}
+.sel-ne {
+  right: -5px;
+  top: -5px;
+  cursor: nesw-resize;
+}
+.sel-e {
+  right: -5px;
+  top: calc(50% - 5px);
+  cursor: ew-resize;
+}
+.sel-se {
+  right: -5px;
+  bottom: -5px;
+  cursor: nwse-resize;
+}
+.sel-s {
+  left: calc(50% - 5px);
+  bottom: -5px;
+  cursor: ns-resize;
+}
+.sel-sw {
+  left: -5px;
+  bottom: -5px;
+  cursor: nesw-resize;
+}
+.sel-w {
+  left: -5px;
+  top: calc(50% - 5px);
+  cursor: ew-resize;
+}
+
+/* 挿入ツールバー(編集モード時、スライド左上に浮かべる)。 */
+.insert-bar {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 9;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--ui-panel) 92%, transparent);
+  border: 1px solid var(--ui-line);
+  box-shadow: var(--shadow-pop);
+  backdrop-filter: blur(8px);
+}
+
+.insert-bar button {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ui-soft);
+  cursor: pointer;
+  transition:
+    background-color 0.15s var(--ease),
+    color 0.15s var(--ease);
+}
+
+.insert-bar button svg {
+  width: 19px;
+  height: 19px;
+}
+
+.insert-bar button:hover {
+  background: var(--ui-accent-tint);
+  color: var(--ui-accent);
+}
+
+.insert-sep {
+  width: 1px;
+  height: 20px;
+  margin: 0 2px;
+  background: var(--ui-line);
 }
 
 /* 背景画像つきスライドは陰を敷いて文字を読みやすく */
