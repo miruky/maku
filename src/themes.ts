@@ -61,15 +61,58 @@ const FONTS = {
 
 const hsl = (h: number, s: number, l: number): string => `hsl(${h} ${Math.round(s)}% ${l}%)`;
 
+// ── コントラスト計算(WCAG)。地色が淡い昼テーマで、緑・黄系のaccent/mutedが
+//    本文サイズ(リンク・小見出し)で4.5を割らないよう、明度を必要なだけ下げる。──
+function hslToRgb(h: number, s: number, l: number): [number, number, number] {
+  const sn = s / 100;
+  const ln = l / 100;
+  const k = (n: number): number => (n + h / 30) % 12;
+  const a = sn * Math.min(ln, 1 - ln);
+  const f = (n: number): number => ln - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1));
+  return [f(0), f(8), f(4)];
+}
+
+function relLuminance([r, g, b]: [number, number, number]): number {
+  const lin = (v: number): number => (v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
+  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+}
+
+export function contrastRatio(
+  a: [number, number, number],
+  b: [number, number, number],
+): number {
+  const la = relLuminance(a);
+  const lb = relLuminance(b);
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+}
+
+// 地色bgに対し目標コントラストを満たす最大の明度(startLから下げて探す)を返す。
+function lightnessForContrast(
+  h: number,
+  s: number,
+  bg: [number, number, number],
+  target: number,
+  startL: number,
+): number {
+  for (let l = startL; l >= 10; l -= 1) {
+    if (contrastRatio(hslToRgb(h, s, l), bg) >= target) return l;
+  }
+  return 10;
+}
+
 function lightVars(f: Family): Record<string, string> {
   const a = Math.max(f.sat, 50);
+  const bg = hslToRgb(f.hue, f.sat * 0.5, 97);
+  // 本文サイズで使う色は4.5以上を確保(余裕を見て4.6)。淡い地色なので緑黄系は暗くなる。
+  const accentL = lightnessForContrast(f.hue, a, bg, 4.6, 40);
+  const mutedL = lightnessForContrast(f.hue, f.sat * 0.4, bg, 4.6, 42);
   return {
     '--bg': hsl(f.hue, f.sat * 0.5, 97),
     '--surface': hsl(f.hue, f.sat * 0.5, 99),
     '--fg': hsl(f.hue, Math.min(f.sat, 28), 15),
-    '--muted': hsl(f.hue, f.sat * 0.4, 42),
+    '--muted': hsl(f.hue, f.sat * 0.4, mutedL),
     '--rule': hsl(f.hue, f.sat * 0.5, 87),
-    '--accent': hsl(f.hue, a, 40),
+    '--accent': hsl(f.hue, a, accentL),
     '--accent-soft': hsl(f.hue, a * 0.7, 92),
     '--code-bg': hsl(f.hue, f.sat * 0.5, 94),
   };
@@ -119,6 +162,20 @@ export const DEFAULT_THEME_ID = 'ai-hiru-mincho';
 
 export function themeById(id: string): Theme {
   return THEMES.find((t) => t.id === id) ?? THEMES.find((t) => t.id === DEFAULT_THEME_ID) ?? THEMES[0]!;
+}
+
+function parseHsl(value: string): [number, number, number] {
+  const m = /hsl\(\s*([\d.]+)\s+([\d.]+)%\s+([\d.]+)%/.exec(value);
+  if (!m) return [0, 0, 0];
+  return hslToRgb(Number(m[1]), Number(m[2]), Number(m[3]));
+}
+
+// テーマ内の色変数どうしのコントラスト比。アクセシビリティ検証に使う。
+export function varContrast(theme: Theme, fgKey: string, bgKey = '--bg'): number {
+  const fg = theme.vars[fgKey];
+  const bg = theme.vars[bgKey];
+  if (!fg || !bg) return 0;
+  return contrastRatio(parseHsl(fg), parseHsl(bg));
 }
 
 // テーマのCSS変数を要素に適用する。
