@@ -157,7 +157,8 @@ body {
   cursor: pointer;
   transition:
     background-color 0.16s var(--ease),
-    color 0.16s var(--ease);
+    color 0.16s var(--ease),
+    transform 0.16s var(--ease);
 }
 
 .ico svg {
@@ -166,8 +167,13 @@ body {
 }
 
 .ico:hover {
-  background: color-mix(in srgb, var(--ui-accent) 12%, transparent);
+  background: var(--ui-accent-tint);
   color: var(--ui-accent);
+  transform: translateY(-1px);
+}
+
+.ico:active {
+  transform: translateY(0);
 }
 
 .ico.on,
@@ -685,18 +691,28 @@ body {
 
 .mini {
   font: inherit;
-  font-size: 12px;
+  font-size: var(--ts-sm);
   border: 1px solid var(--ui-line);
   background: transparent;
   color: var(--ui-soft);
-  border-radius: 7px;
-  padding: 4px 10px;
+  border-radius: var(--r-sm);
+  padding: 5px 11px;
   cursor: pointer;
+  transition:
+    border-color 0.16s var(--ease),
+    color 0.16s var(--ease),
+    background-color 0.16s var(--ease),
+    transform 0.16s var(--ease);
 }
 
 .mini:hover {
   border-color: var(--ui-accent);
   color: var(--ui-accent);
+  background: var(--ui-accent-tint);
+}
+
+.mini:active {
+  transform: translateY(1px);
 }
 
 .notes-body {
@@ -1098,6 +1114,49 @@ body {
   text-decoration: none;
 }
 
+/* ── 入場モーション(意味のある最小限。reduced-motionで無効化)── */
+
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.99);
+  }
+}
+
+@keyframes cell-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+
+.overlay:not([hidden]) {
+  animation: overlay-in 0.2s var(--ease);
+}
+
+.overlay:not([hidden]) .overview-grid,
+.overlay:not([hidden]) .theme-grid,
+.overlay:not([hidden]) .help-card {
+  animation: pop-in 0.26s var(--ease) both;
+}
+
+.menu:not([hidden]) {
+  animation: pop-in 0.16s var(--ease);
+  transform-origin: top right;
+}
+
+/* 一覧サムネは開いた順に少しずつ立ち上げる(端は待たせすぎない)。 */
+.ov-cell {
+  animation: cell-in 0.34s var(--ease) both;
+  animation-delay: calc(min(var(--i, 0), 16) * 22ms);
+}
+
 /* ── 印刷(PDF)── */
 
 #print-deck {
@@ -1158,7 +1217,9 @@ body {
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
+    animation-delay: 0.01ms !important;
     transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
   .frag-hidden {
     transform: none;
