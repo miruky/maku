@@ -2,6 +2,19 @@ import './style.css';
 import { parseDeck } from './deck';
 import { blockToMd } from './edit';
 import { exportPdf, exportPptx } from './export';
+import {
+  applyOverlay,
+  clampBox,
+  ensureSlide,
+  loadOverlay,
+  newId,
+  reindexAfterDelete,
+  saveOverlay,
+  slideOverlay,
+  type Box,
+  type Shape,
+  type ShapeKind,
+} from './overlay';
 import { slideHtml } from './render';
 import { Presenter } from './present';
 import { applyTheme, DEFAULT_THEME_ID, THEMES, themeById } from './themes';
@@ -341,9 +354,9 @@ function rebuild(keepIndex = true): void {
   }
 }
 
-// ── スライド直接編集(view ⇄ md の双方向) ──
-// 描画されたブロックは data-src="開始-終了"(原文の絶対オフセット)を持つ。
-// view側で編集されたら、そのブロックをMarkdownへ戻し、原文の該当範囲を差し替える。
+// ── スライド直接編集(PowerPoint風の自由配置 + view ⇄ md の双方向) ──
+// 文字内容だけが Markdown。位置・サイズ・図形は overlay(localStorage)に持ち、md は汚さない。
+// 描画ブロックは data-src(原文の絶対オフセット)と data-bi(描画順index)を持つ。
 const LIVE_KEY = 'maku.liveedit';
 let liveEdit = localStorage.getItem(LIVE_KEY) !== 'off';
 let presenting = false;
@@ -351,6 +364,7 @@ let viewDirty = false;
 let editingBlock: HTMLElement | null = null;
 let editStart = 0;
 let editEnd = 0;
+const overlay = loadOverlay();
 
 function rangeOf(el: HTMLElement): [number, number] {
   const m = /^(\d+)-(\d+)$/.exec(el.dataset.src ?? '');
@@ -358,28 +372,6 @@ function rangeOf(el: HTMLElement): [number, number] {
 }
 function setRange(el: HTMLElement, s: number, e: number): void {
   el.dataset.src = `${s}-${e}`;
-}
-
-// 描画のたびに編集可否を反映する(Presenter から onAfterRender 経由で呼ばれる)。
-function decorateStage(): void {
-  const enable = liveEdit && !presenting;
-  deckRoot.classList.toggle('live', enable);
-  stage.querySelectorAll<HTMLElement>('[data-src]').forEach((block) => {
-    const targets =
-      block.tagName === 'TABLE'
-        ? Array.from(block.querySelectorAll<HTMLElement>('th, td'))
-        : block.tagName === 'PRE'
-          ? Array.from(block.querySelectorAll<HTMLElement>('code'))
-          : [block];
-    for (const t of targets) {
-      if (enable) {
-        t.setAttribute('contenteditable', 'true');
-        t.spellcheck = false;
-      } else {
-        t.removeAttribute('contenteditable');
-      }
-    }
-  });
 }
 
 function persistMd(): void {
@@ -390,21 +382,274 @@ function persistMd(): void {
   }
 }
 
-// view側の編集をまだ原文に取り込んでいなければ取り込み、再パースして全体を同期する。
-function flushView(): void {
-  if (!viewDirty) return;
-  viewDirty = false;
-  editingBlock = null;
-  rebuild(true);
+// ── 選択・移動・リサイズ ──
+type Selection =
+  | { kind: 'block'; el: HTMLElement; index: number }
+  | { kind: 'shape'; el: HTMLElement; id: string };
+let sel: Selection | null = null;
+
+// 選択枠(8ハンドル)。stageは再描画で中身が入れ替わるので deckRoot 側に置く。
+const frame = document.createElement('div');
+frame.className = 'sel-frame';
+frame.hidden = true;
+frame.innerHTML = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w']
+  .map((h) => `<div class="sel-h sel-${h}" data-h="${h}"></div>`)
+  .join('');
+deckRoot.appendChild(frame);
+
+// 挿入ツールバー。
+const insertBar = document.createElement('div');
+insertBar.className = 'insert-bar';
+insertBar.hidden = true;
+insertBar.innerHTML = `
+  <button data-insert="text" title="テキストボックス" aria-label="テキストボックス"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M5 6h14M9 6v12M7 18h4"/><path d="M14 12h6M17 12v6M15 18h4" opacity="0"/></svg></button>
+  <button data-insert="rect" title="四角形" aria-label="四角形"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="6" width="16" height="12" rx="1.5"/></svg></button>
+  <button data-insert="ellipse" title="円・楕円" aria-label="円・楕円"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><ellipse cx="12" cy="12" rx="8" ry="6.5"/></svg></button>
+  <button data-insert="triangle" title="三角形" aria-label="三角形"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M12 5l8 14H4z"/></svg></button>
+  <button data-insert="line" title="直線" aria-label="直線"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M5 19L19 5"/></svg></button>
+  <button data-insert="arrow" title="矢印" aria-label="矢印"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 19L18 6M10 6h8v8"/></svg></button>
+  <span class="insert-sep"></span>
+  <button data-insert="delete" title="選択を削除 (Delete)" aria-label="削除"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M5 7h14M10 7V5h4v2M8 7l1 13h6l1-13"/></svg></button>
+`;
+deckRoot.appendChild(insertBar);
+
+function slideEl(): HTMLElement | null {
+  return stage.querySelector<HTMLElement>('.slide');
 }
 
-stage.addEventListener('focusin', (e) => {
+// 要素の現在位置を、スライドに対する%の箱として返す。
+function rectPct(el: HTMLElement): Box {
+  const sr = (slideEl() ?? stage).getBoundingClientRect();
+  const er = el.getBoundingClientRect();
+  return {
+    x: ((er.left - sr.left) / sr.width) * 100,
+    y: ((er.top - sr.top) / sr.height) * 100,
+    w: (er.width / sr.width) * 100,
+    h: (er.height / sr.height) * 100,
+  };
+}
+
+function findShape(id: string): Shape | undefined {
+  return overlay[presenter.index]?.shapes.find((s) => s.id === id);
+}
+
+function currentBox(s: Selection): Box {
+  if (s.kind === 'shape') {
+    const sh = findShape(s.id);
+    return sh ? { x: sh.x, y: sh.y, w: sh.w, h: sh.h } : rectPct(s.el);
+  }
+  const p = overlay[presenter.index]?.blocks[s.index];
+  const r = rectPct(s.el);
+  return p ? { x: p.x, y: p.y, w: p.w, h: p.h ?? r.h } : r;
+}
+
+function positionFrame(): void {
+  if (!sel || !liveEdit || presenting || editingBlock) {
+    frame.hidden = true;
+    return;
+  }
+  const dr = deckRoot.getBoundingClientRect();
+  const er = sel.el.getBoundingClientRect();
+  frame.style.left = `${er.left - dr.left}px`;
+  frame.style.top = `${er.top - dr.top}px`;
+  frame.style.width = `${er.width}px`;
+  frame.style.height = `${er.height}px`;
+  frame.dataset.kind = sel.kind;
+  frame.hidden = false;
+}
+
+function selectBlock(el: HTMLElement): void {
+  sel = { kind: 'block', el, index: Number(el.dataset.bi ?? 0) };
+  positionFrame();
+}
+function selectShape(el: HTMLElement): void {
+  sel = { kind: 'shape', el, id: el.dataset.sid ?? '' };
+  positionFrame();
+}
+function deselect(): void {
+  sel = null;
+  frame.hidden = true;
+}
+
+// 箱を選択要素へ反映(overlayと要素スタイル両方)。
+function applyBox(box: Box, resizingHeight: boolean): void {
+  if (!sel) return;
+  if (sel.kind === 'shape') {
+    const sh = findShape(sel.id);
+    if (sh) {
+      sh.x = box.x;
+      sh.y = box.y;
+      sh.w = box.w;
+      sh.h = box.h;
+    }
+    sel.el.style.left = `${box.x}%`;
+    sel.el.style.top = `${box.y}%`;
+    sel.el.style.width = `${box.w}%`;
+    sel.el.style.height = `${box.h}%`;
+  } else {
+    const o = ensureSlide(overlay, presenter.index);
+    const prev = o.blocks[sel.index];
+    const h = resizingHeight ? box.h : prev?.h;
+    o.blocks[sel.index] = { x: box.x, y: box.y, w: box.w, ...(h != null ? { h } : {}) };
+    sel.el.style.position = 'absolute';
+    sel.el.style.left = `${box.x}%`;
+    sel.el.style.top = `${box.y}%`;
+    sel.el.style.width = `${box.w}%`;
+    sel.el.style.maxWidth = 'none';
+    sel.el.style.height = h != null ? `${h}%` : '';
+    sel.el.classList.add('ov-placed');
+  }
+  positionFrame();
+}
+
+function resizeBox(b: Box, handle: string, dx: number, dy: number): Box {
+  const r = { ...b };
+  if (handle.includes('e')) r.w = b.w + dx;
+  if (handle.includes('s')) r.h = b.h + dy;
+  if (handle.includes('w')) {
+    r.w = b.w - dx;
+    r.x = b.x + dx;
+  }
+  if (handle.includes('n')) {
+    r.h = b.h - dy;
+    r.y = b.y + dy;
+  }
+  return r;
+}
+
+let drag: {
+  mode: 'move' | 'resize';
+  handle: string;
+  startX: number;
+  startY: number;
+  box: Box;
+  moved: boolean;
+  reselect: boolean;
+} | null = null;
+
+deckRoot.addEventListener('pointerdown', (e) => {
   if (!liveEdit || presenting) return;
-  const block = (e.target as HTMLElement).closest<HTMLElement>('[data-src]');
-  if (!block) return;
+  const t = e.target as HTMLElement;
+  // 編集中に外側をクリックしたら確定だけして抜ける(再描画でDOMが入れ替わるため)。
+  if (editingBlock && !editingBlock.contains(t)) {
+    commitEdit();
+    deselect();
+    return;
+  }
+  const handle = t.closest<HTMLElement>('.sel-h');
+  if (handle && sel) {
+    e.preventDefault();
+    drag = { mode: 'resize', handle: handle.dataset.h ?? '', startX: e.clientX, startY: e.clientY, box: currentBox(sel), moved: false, reselect: true };
+    deckRoot.setPointerCapture(e.pointerId);
+    return;
+  }
+  const shape = t.closest<HTMLElement>('.ov-shape');
+  if (shape) {
+    e.preventDefault();
+    const was = sel?.kind === 'shape' && sel.el === shape;
+    selectShape(shape);
+    drag = { mode: 'move', handle: '', startX: e.clientX, startY: e.clientY, box: currentBox(sel!), moved: false, reselect: !!was };
+    deckRoot.setPointerCapture(e.pointerId);
+    return;
+  }
+  const block = t.closest<HTMLElement>('.slide-body [data-src]');
+  if (block) {
+    if (editingBlock === block) return; // 編集中のブロック内クリックは通常操作
+    e.preventDefault();
+    const was = sel?.kind === 'block' && sel.el === block;
+    selectBlock(block);
+    drag = { mode: 'move', handle: '', startX: e.clientX, startY: e.clientY, box: currentBox(sel!), moved: false, reselect: !!was };
+    deckRoot.setPointerCapture(e.pointerId);
+    return;
+  }
+  if (t.closest('.stage')) {
+    commitEdit();
+    deselect();
+  }
+});
+
+deckRoot.addEventListener('pointermove', (e) => {
+  if (!drag || !sel) return;
+  const sr = (slideEl() ?? stage).getBoundingClientRect();
+  const dx = ((e.clientX - drag.startX) / sr.width) * 100;
+  const dy = ((e.clientY - drag.startY) / sr.height) * 100;
+  if (Math.abs(e.clientX - drag.startX) + Math.abs(e.clientY - drag.startY) > 3) drag.moved = true;
+  let box: Box;
+  let resizingHeight = false;
+  if (drag.mode === 'move') {
+    box = { ...drag.box, x: drag.box.x + dx, y: drag.box.y + dy };
+  } else {
+    box = resizeBox(drag.box, drag.handle, dx, dy);
+    resizingHeight = drag.handle.includes('n') || drag.handle.includes('s');
+  }
+  applyBox(clampBox(box), resizingHeight);
+});
+
+deckRoot.addEventListener('pointerup', (e) => {
+  if (!drag) return;
+  try {
+    deckRoot.releasePointerCapture(e.pointerId);
+  } catch {
+    // capture が無くても無視
+  }
+  const clicked = !drag.moved;
+  const reselect = drag.reselect;
+  drag = null;
+  if (clicked) {
+    // 移動なしのクリック: すでに選択済みのテキストブロックを再クリック → 文字編集へ
+    if (sel?.kind === 'block' && reselect) enterEdit(sel.el);
+  } else {
+    saveOverlay(overlay);
+  }
+});
+
+deckRoot.addEventListener('dblclick', (e) => {
+  if (!liveEdit || presenting) return;
+  const block = (e.target as HTMLElement).closest<HTMLElement>('.slide-body [data-src]');
+  if (block) {
+    selectBlock(block);
+    enterEdit(block);
+  }
+});
+
+// ── 文字編集(contenteditable)。view → md を即時反映 ──
+function editTargets(block: HTMLElement): HTMLElement[] {
+  if (block.tagName === 'TABLE') return Array.from(block.querySelectorAll<HTMLElement>('th, td'));
+  if (block.tagName === 'PRE') return Array.from(block.querySelectorAll<HTMLElement>('code'));
+  return [block];
+}
+
+function enterEdit(block: HTMLElement): void {
+  if (editingBlock === block) return;
+  commitEdit();
+  const targets = editTargets(block);
+  for (const t of targets) {
+    t.setAttribute('contenteditable', 'true');
+    t.spellcheck = false;
+  }
   editingBlock = block;
   [editStart, editEnd] = rangeOf(block);
-});
+  deckRoot.classList.add('editing');
+  frame.hidden = true;
+  const focusEl = targets[0] ?? block;
+  focusEl.focus();
+  const r = document.createRange();
+  r.selectNodeContents(focusEl);
+  r.collapse(false);
+  const s = window.getSelection();
+  s?.removeAllRanges();
+  s?.addRange(r);
+}
+
+function commitEdit(): void {
+  if (editingBlock) {
+    for (const t of editTargets(editingBlock)) t.removeAttribute('contenteditable');
+    editingBlock.removeAttribute('contenteditable');
+    editingBlock = null;
+    deckRoot.classList.remove('editing');
+  }
+  flushView();
+}
 
 stage.addEventListener('input', () => {
   if (!editingBlock || !liveEdit) return;
@@ -425,12 +670,133 @@ stage.addEventListener('input', () => {
 });
 
 stage.addEventListener('focusout', () => {
-  // 別ブロックへ移動しただけなら再描画しない(キャレットを保つ)。
-  // 編集領域から完全に離れたときだけ原文と同期する。
   window.setTimeout(() => {
-    if (!stage.contains(document.activeElement)) flushView();
+    if (editingBlock && !editingBlock.contains(document.activeElement)) commitEdit();
   }, 120);
 });
+
+// view側の編集をまだ原文に取り込んでいなければ取り込み、再パースして全体を同期する。
+function flushView(): void {
+  if (!viewDirty) return;
+  viewDirty = false;
+  rebuild(true);
+}
+
+// ── 挿入(テキストは md へ、図形は overlay のみ)──
+function defaultShapeBox(kind: ShapeKind): Box {
+  if (kind === 'line' || kind === 'arrow') return { x: 28, y: 47, w: 44, h: 6 };
+  if (kind === 'ellipse') return { x: 34, y: 33, w: 32, h: 30 };
+  return { x: 34, y: 33, w: 32, h: 28 };
+}
+
+function insertShape(kind: ShapeKind): void {
+  const o = ensureSlide(overlay, presenter.index);
+  const shape: Shape = { id: newId(), kind, ...defaultShapeBox(kind) };
+  o.shapes.push(shape);
+  saveOverlay(overlay);
+  decorateStage();
+  const el = stage.querySelector<HTMLElement>(`.ov-shape[data-sid="${shape.id}"]`);
+  if (el) selectShape(el);
+}
+
+function insertTextBox(): void {
+  const deck = parseDeck(mdInput.value);
+  const slide = deck.slides[presenter.index];
+  if (!slide) return;
+  // 追加ブロックの index = いま表示中スライドの本文ブロック数
+  const newIndex = stage.querySelectorAll('.slide-body [data-src]').length;
+  const lines = slide.bodyLines;
+  const at = lines.length ? lines[lines.length - 1]!.offset + lines[lines.length - 1]!.text.length : mdInput.value.length;
+  const before = mdInput.value.slice(0, at);
+  const text = 'テキスト';
+  mdInput.value = before + (before === '' || before.endsWith('\n') ? '\n' : '\n\n') + text + mdInput.value.slice(at);
+  persistMd();
+  const o = ensureSlide(overlay, presenter.index);
+  o.blocks[newIndex] = { x: 32, y: 40, w: 36 };
+  saveOverlay(overlay);
+  rebuild(true);
+  const el = stage.querySelector<HTMLElement>(`.slide-body [data-src][data-bi="${newIndex}"]`);
+  if (el) {
+    selectBlock(el);
+    enterEdit(el);
+  }
+}
+
+function deleteSelection(): void {
+  if (!sel) return;
+  if (sel.kind === 'shape') {
+    const id = sel.id;
+    const o = ensureSlide(overlay, presenter.index);
+    o.shapes = o.shapes.filter((s) => s.id !== id);
+    saveOverlay(overlay);
+    deselect();
+    decorateStage();
+    return;
+  }
+  // ブロック: md本文から該当範囲を除去し、overlay の index を詰め直す。
+  const [start, e0] = rangeOf(sel.el);
+  let end = e0;
+  const v = mdInput.value;
+  if (v[end] === '\n') end += 1;
+  if (v[end] === '\n') end += 1;
+  mdInput.value = v.slice(0, start) + v.slice(end);
+  persistMd();
+  const o = ensureSlide(overlay, presenter.index);
+  delete o.blocks[sel.index];
+  o.blocks = reindexAfterDelete(o.blocks, sel.index);
+  saveOverlay(overlay);
+  deselect();
+  rebuild(true);
+}
+
+function nudge(key: string, big: boolean): void {
+  if (!sel) return;
+  const step = big ? 5 : 1;
+  const b = currentBox(sel);
+  if (key === 'ArrowLeft') b.x -= step;
+  else if (key === 'ArrowRight') b.x += step;
+  else if (key === 'ArrowUp') b.y -= step;
+  else if (key === 'ArrowDown') b.y += step;
+  applyBox(clampBox(b), false);
+  saveOverlay(overlay);
+}
+
+insertBar.addEventListener('pointerdown', (e) => e.stopPropagation());
+insertBar.addEventListener('click', (e) => {
+  const btn = (e.target as HTMLElement).closest<HTMLElement>('button[data-insert]');
+  if (!btn) return;
+  const what = btn.dataset.insert!;
+  if (what === 'text') insertTextBox();
+  else if (what === 'delete') deleteSelection();
+  else insertShape(what as ShapeKind);
+});
+
+// 描画のたびに編集の見た目と選択枠を更新する(Presenter から onAfterRender 経由)。
+function decorateStage(): void {
+  const enable = liveEdit && !presenting;
+  deckRoot.classList.toggle('live', enable);
+  insertBar.hidden = !enable;
+  const el = slideEl();
+  if (el) applyOverlay(el, slideOverlay(overlay, presenter.index));
+  if (!enable) {
+    frame.hidden = true;
+    return;
+  }
+  // 再描画で要素が入れ替わるので、選択を index/id で取り直す。
+  if (sel?.kind === 'block') {
+    const b = stage.querySelector<HTMLElement>(`.slide-body [data-src][data-bi="${sel.index}"]`);
+    if (b) {
+      sel.el = b;
+      positionFrame();
+    } else deselect();
+  } else if (sel?.kind === 'shape') {
+    const s = stage.querySelector<HTMLElement>(`.ov-shape[data-sid="${sel.id}"]`);
+    if (s) {
+      sel.el = s;
+      positionFrame();
+    } else deselect();
+  }
+}
 
 function setLiveEdit(on: boolean): void {
   liveEdit = on;
@@ -440,17 +806,30 @@ function setLiveEdit(on: boolean): void {
     // 保存失敗は無視
   }
   $('live-edit').classList.toggle('on', on);
+  if (!on) {
+    commitEdit();
+    deselect();
+  }
   decorateStage();
 }
 
 // 発表(全画面)中は直接編集を止める。
 document.addEventListener('fullscreenchange', () => {
   presenting = !!document.fullscreenElement;
+  if (presenting) {
+    commitEdit();
+    deselect();
+  }
   decorateStage();
 });
 
-// 移動前に view 側の編集を取り込んでから動かす(Presenter内部のデッキを最新化)。
+// 選択枠はスライドの表示サイズ変化に追従させる。
+new ResizeObserver(() => positionFrame()).observe(deckRoot);
+
+// 移動前に編集を確定し、選択を解除してから動かす(Presenter内部のデッキを最新化)。
 function nav(action: () => void): void {
+  commitEdit();
+  deselect();
   flushView();
   action();
 }
@@ -547,10 +926,10 @@ async function runExport(kind: string): Promise<void> {
   const onProgress = (done: number, t: number): void => setBusy(true, '書き出し中…', done, t);
   try {
     if (kind === 'pdf') {
-      await exportPdf(deck, currentTheme, onProgress);
+      await exportPdf(deck, currentTheme, onProgress, overlay);
       toast('PDF を書き出しました');
     } else if (kind === 'pptx' || kind === 'gslides') {
-      await exportPptx(deck, currentTheme, onProgress);
+      await exportPptx(deck, currentTheme, onProgress, overlay);
       if (kind === 'gslides') toggle('gslides-modal', true);
       else toast('PowerPoint (.pptx) を書き出しました');
     }
@@ -709,6 +1088,23 @@ window.addEventListener('keydown', (ev) => {
   const target = ev.target as HTMLElement;
   if (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT' || target.isContentEditable) return;
   if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+  // 選択中の図形/ブロックの操作(削除・微調整・選択解除)を移動より優先する。
+  if (liveEdit && !presenting && sel && !editingBlock) {
+    if (ev.key === 'Delete' || ev.key === 'Backspace') {
+      ev.preventDefault();
+      deleteSelection();
+      return;
+    }
+    if (ev.key === 'Escape') {
+      deselect();
+      return;
+    }
+    if (ev.key.startsWith('Arrow')) {
+      ev.preventDefault();
+      nudge(ev.key, ev.shiftKey);
+      return;
+    }
+  }
   switch (ev.key) {
     case 'ArrowRight':
     case ' ':
