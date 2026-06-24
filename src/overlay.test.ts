@@ -4,8 +4,11 @@ import {
   applyOverlay,
   clampBox,
   ensureSlide,
+  isImageShape,
   reindexAfterDelete,
+  sanitizeOverlay,
   shapeInnerSvg,
+  shapeLabel,
   slideOverlay,
   type Overlay,
 } from './overlay';
@@ -93,5 +96,85 @@ describe('applyOverlay (DOM)', () => {
     expect(shape).not.toBeNull();
     expect(shape!.style.left).toBe('10%');
     expect(shape!.querySelector('ellipse')).not.toBeNull();
+  });
+
+  it('画像シェイプを img として描き、src/alt をエスケープする', () => {
+    const el = slide('<p data-src="0-1">x</p>');
+    applyOverlay(el, {
+      blocks: {},
+      shapes: [
+        { id: 'i1', kind: 'image', x: 10, y: 20, w: 30, h: 40, src: 'data:image/png;base64,AAA', alt: 'a"><b' },
+      ],
+    });
+    const img = el.querySelector<HTMLImageElement>('.ov-shape-image img');
+    expect(img).not.toBeNull();
+    expect(img!.getAttribute('src')).toBe('data:image/png;base64,AAA');
+    expect(img!.getAttribute('alt')).toBe('a"><b'); // 属性として正しく復元(=注入されていない)
+    expect(el.querySelector('.ov-shapes b')).toBeNull(); // 生タグとして出ていない
+  });
+
+  it('javascript: の画像srcは空にする', () => {
+    const el = slide('');
+    applyOverlay(el, {
+      blocks: {},
+      shapes: [{ id: 'i', kind: 'image', x: 0, y: 0, w: 10, h: 10, src: 'javascript:alert(1)', alt: '' }],
+    });
+    expect(el.querySelector<HTMLImageElement>('.ov-shape-image img')!.getAttribute('src')).toBe('');
+  });
+});
+
+describe('isImageShape / shapeLabel', () => {
+  it('画像だけを判定する', () => {
+    expect(isImageShape({ id: 'a', kind: 'image', x: 0, y: 0, w: 1, h: 1, src: 'data:,', alt: '' })).toBe(true);
+    expect(isImageShape({ id: 'b', kind: 'rect', x: 0, y: 0, w: 1, h: 1 })).toBe(false);
+  });
+  it('全種類にラベルがある', () => {
+    expect(shapeLabel('image')).toBe('画像');
+    expect(shapeLabel('rect')).toBe('四角形');
+  });
+});
+
+describe('sanitizeOverlay', () => {
+  it('不正なキー・未知の種類・id欠落を落とす', () => {
+    const clean = sanitizeOverlay({
+      0: {
+        blocks: { 0: { x: 1, y: 2, w: 3 } },
+        shapes: [
+          { id: 'ok', kind: 'rect', x: 1, y: 1, w: 1, h: 1 },
+          { id: 'bad', kind: 'script', x: 1, y: 1, w: 1, h: 1 },
+          { kind: 'rect', x: 1, y: 1, w: 1, h: 1 },
+        ],
+      },
+      x: { shapes: [] },
+    });
+    expect(Object.keys(clean)).toEqual(['0']);
+    expect(clean[0]!.shapes.map((s) => s.id)).toEqual(['ok']);
+    expect(clean[0]!.blocks[0]).toEqual({ x: 1, y: 2, w: 3 });
+  });
+
+  it('画像の危険な src は空にして残す', () => {
+    const clean = sanitizeOverlay({
+      0: { shapes: [{ id: 'i', kind: 'image', x: 0, y: 0, w: 1, h: 1, src: 'javascript:x', alt: 'a' }] },
+    });
+    const sh = clean[0]!.shapes[0]!;
+    expect(sh.kind).toBe('image');
+    expect((sh as { src: string }).src).toBe('');
+  });
+
+  it('範囲外の座標は読み込み時に 0–100 へ収める', () => {
+    const clean = sanitizeOverlay({
+      0: { shapes: [{ id: 'a', kind: 'rect', x: -50, y: 200, w: 1000, h: 1000 }] },
+    });
+    const sh = clean[0]!.shapes[0]!;
+    expect(sh.w).toBeLessThanOrEqual(100);
+    expect(sh.x).toBeGreaterThanOrEqual(0);
+    expect(sh.y + sh.h).toBeLessThanOrEqual(100);
+  });
+
+  it('非正の aspect ratio は捨てる', () => {
+    const clean = sanitizeOverlay({
+      0: { shapes: [{ id: 'i', kind: 'image', x: 0, y: 0, w: 10, h: 10, src: 'data:,', alt: '', ar: -2 }] },
+    });
+    expect((clean[0]!.shapes[0] as { ar?: number }).ar).toBeUndefined();
   });
 });

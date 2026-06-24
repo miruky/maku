@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseDeck } from './deck';
-import { slideClassName, slideHtml, slideStyleAttr } from './render';
+import { slideClassName, slideHtml, slideHtmlMapped, slideStyleAttr } from './render';
 
 function slide(md: string) {
   return parseDeck(md).slides[0]!;
@@ -42,5 +42,92 @@ describe('render', () => {
 
   it('通常スライドはMarkdownを描画', () => {
     expect(slideHtml(slide('# 見出し'))).toContain('<h1>見出し</h1>');
+  });
+
+  it('grid は --cells とセルを出す', () => {
+    const html = slideHtml(slide('<!-- layout: grid -->\nA\n===\nB\n===\nC'));
+    expect(html).toContain('class="grid"');
+    expect(html).toContain('--cells:3');
+    expect((html.match(/grid-cell/g) ?? []).length).toBe(3);
+  });
+
+  it('section はラベル・タイトル・罫を出す', () => {
+    const html = slideHtml(slide('<!-- layout: section -->\n03\n===\n# 設計'));
+    expect(html).toContain('section-kicker');
+    expect(html).toContain('section-title');
+    expect(html).toContain('<h1>設計</h1>');
+    expect(html).toContain('section-rule');
+  });
+
+  it('quote はダッシュ行を出典にし、ダッシュは除く', () => {
+    const html = slideHtml(slide('<!-- layout: quote -->\n大切なものは目に見えない。\n— 星の王子さま'));
+    expect(html).toContain('quote-text');
+    expect(html).toContain('quote-by');
+    expect(html).toContain('星の王子さま');
+    expect(html).not.toContain('— 星の王子さま'); // ダッシュはCSSで付与
+  });
+
+  it('stats は数値と単位を分け、#### を上ラベルにする', () => {
+    const html = slideHtml(slide('<!-- layout: stats -->\n#### 継続率\n98.6%\n前年比'));
+    expect(html).toContain('stat-figure');
+    expect(html).toContain('98.6');
+    expect(html).toContain('<span class="stat-unit">%</span>');
+    expect(html).toContain('stat-kicker');
+  });
+
+  it('compare は2パネルとvsを出す', () => {
+    const html = slideHtml(slide('<!-- layout: compare -->\n### A\n左\n===\n### B\n右'));
+    expect(html).toContain('cmp-a');
+    expect(html).toContain('cmp-b');
+    expect(html).toContain('cmp-vs');
+  });
+
+  it('timeline は箇条書きをイベントにし、=== で時を分ける', () => {
+    const html = slideHtml(slide('<!-- layout: timeline -->\n# 沿革\n\n- 2019 === 開始\n- 2021 === 公開'));
+    expect(html).toContain('timeline-track');
+    expect((html.match(/tl-event/g) ?? []).length).toBe(2);
+    expect(html).toContain('<span class="tl-time">2019</span>');
+  });
+
+  it('cards は導入帯とカードを分ける', () => {
+    const html = slideHtml(slide('<!-- layout: cards -->\n# 柱\n導入\n===\n### A\n本文\n===\n### B\n本文'));
+    expect(html).toContain('cards-lead');
+    expect((html.match(/class="card"/g) ?? []).length).toBe(2);
+  });
+
+  it('image-left は最初の画像をメディアにする', () => {
+    const html = slideHtml(slide('<!-- layout: image-left -->\n![図](https://e.com/a.jpg)\n## 見出し'));
+    expect(html).toContain('media-split');
+    expect(html).toContain("background-image:url('https://e.com/a.jpg')");
+    expect(html).toContain('<h2>見出し</h2>');
+  });
+
+  it('画像が無ければ empty メディアにフォールバック', () => {
+    expect(slideHtml(slide('<!-- layout: image-right -->\n## 見出し'))).toContain('media-fig empty');
+  });
+
+  it('stats: 太字+単位でも ** が漏れない', () => {
+    const html = slideHtml(slide('<!-- layout: stats -->\n#### 売上\n**$1,234** USD\n前年比'));
+    expect(html).not.toContain('**');
+    expect(html).toContain('$1,234');
+    expect(html).toContain('stat-unit');
+  });
+
+  it('段組レイアウトは incremental でセルに data-step が付く', () => {
+    const html = slideHtmlMapped(slide('<!-- layout: grid -->\n<!-- incremental -->\nA\n===\nB\n===\nC'));
+    expect((html.match(/data-step=/g) ?? []).length).toBe(3);
+  });
+
+  it('image-left は === でも画像と本文を分け、=== を残さない', () => {
+    const html = slideHtml(slide('<!-- layout: image-left -->\n本文テキスト\n===\n![z](https://e.com/a.jpg)'));
+    expect(html).toContain("background-image:url('https://e.com/a.jpg')");
+    expect(html).not.toContain('===');
+    expect(html).toContain('本文テキスト');
+  });
+
+  it('image-right: 画像が先の段でも媒体に割り当てる', () => {
+    const html = slideHtml(slide('<!-- layout: image-right -->\n![z](https://e.com/a.jpg)\n===\n本文'));
+    expect(html).toContain("background-image:url('https://e.com/a.jpg')");
+    expect(html).not.toContain('<img'); // 媒体は figure 背景。本文側にインライン画像を残さない
   });
 });

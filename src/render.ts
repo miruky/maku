@@ -1,5 +1,5 @@
 import type { Slide } from './deck';
-import { renderMarkdown, renderMarkdownMapped } from './markdown';
+import { escapeHtml, inline, renderMarkdown, renderMarkdownMapped } from './markdown';
 
 export function slideClassName(slide: Slide): string {
   return ['slide', `layout-${slide.layout}`, ...slide.classes].join(' ');
@@ -14,7 +14,7 @@ function encodeBgUrl(url: string): string {
   );
 }
 
-// 色・グラデーション値を style 属性に入れるためのHTMLエスケープ。属性からの脱出を防ぐ。
+// 色・グラデーション値などを style/属性に入れるためのHTMLエスケープ。属性からの脱出を防ぐ。
 function escapeAttr(value: string): string {
   return value
     .replace(/&/g, '&amp;')
@@ -32,12 +32,299 @@ export function slideStyleAttr(slide: Slide): string {
   return ` style="background:${escapeAttr(bg)}"`;
 }
 
-export function slideInnerHtml(slide: Slide): string {
-  if (slide.layout === 'split' && slide.columns && slide.columns.length > 0) {
-    const cols = slide.columns.map((c) => `<div class="col">${renderMarkdown(c)}</div>`).join('');
-    return `<div class="columns">${cols}</div>`;
+// ── レイアウト別の本文HTML ──
+// mapped=true は編集ステージ用(段組系の各ブロックに data-src を付ける)。
+// stats/quote/timeline/image-* は構造を組み替えるため文字列描画(直接編集の対象外)。
+// セルに付ける段階表示属性。アイテム層レイアウトはセルを順に出す。
+function stepAttr(on: boolean, i: number): string {
+  return on ? ` data-step="${i + 1}"` : '';
+}
+
+function renderBody(slide: Slide, mapped: boolean): string {
+  // アイテム層(grid/cards/stats/timeline/split/compare)は mapped かつ reveal 時に
+  // 各セルへ data-step を付け、順次表示できるようにする。
+  const stepped = mapped && slide.reveal !== 'none';
+  const parts = (): string[] =>
+    mapped && slide.columnLines
+      ? slide.columnLines.map((ls) => renderMarkdownMapped(ls))
+      : (slide.columns ?? []).map((c) => renderMarkdown(c));
+  const whole = (): string =>
+    mapped && slide.bodyLines.length
+      ? renderMarkdownMapped(slide.bodyLines, slide.steps ?? undefined)
+      : renderMarkdown(slide.content);
+
+  switch (slide.layout) {
+    case 'split': {
+      const cols = parts();
+      return cols.length ? wrapCells('columns', 'col', cols, stepped) : whole();
+    }
+    case 'grid': {
+      const cells = parts();
+      return cells.length
+        ? `<div class="grid" style="--cells:${cells.length}">${cells
+            .map((c, i) => `<div class="grid-cell"${stepAttr(stepped, i)}>${c}</div>`)
+            .join('')}</div>`
+        : whole();
+    }
+    case 'cards':
+      return renderCards(parts(), stepped) || whole();
+    case 'compare':
+      return renderCompare(parts(), stepped) || whole();
+    case 'section':
+      return renderSection(parts()) || whole();
+    case 'stats':
+      return renderStats(slide, stepped) || whole();
+    case 'quote':
+      return renderQuote(slide);
+    case 'timeline':
+      return renderTimeline(slide, stepped);
+    case 'image-left':
+      return renderMedia(slide, 'left');
+    case 'image-right':
+      return renderMedia(slide, 'right');
+    default:
+      return whole();
   }
-  return renderMarkdown(slide.content);
+}
+
+function wrapCells(wrap: string, cell: string, cells: string[], stepped = false): string {
+  return `<div class="${wrap}">${cells
+    .map((c, i) => `<div class="${cell}"${stepAttr(stepped, i)}>${c}</div>`)
+    .join('')}</div>`;
+}
+
+// 描画済みHTMLが <h1>…<h6> で始まるなら見出しレベルを、そうでなければ 0 を返す。
+function headLevel(html: string): number {
+  const m = /^\s*<h([1-6])\b/.exec(html);
+  return m ? Number(m[1]) : 0;
+}
+
+function firstNonEmpty(s: string): string {
+  for (const l of s.split('\n')) {
+    const t = l.trim();
+    if (t) return t;
+  }
+  return '';
+}
+
+// カード: 先頭が見出しh1/h2 か本文(=リード)なら導入帯に、h3以降は各カードに。
+function renderCards(parts: string[], stepped = false): string {
+  if (!parts.length) return '';
+  let lead: string | null = null;
+  let cards = parts;
+  if (parts.length >= 2 && headLevel(parts[0]!) <= 2) {
+    lead = parts[0]!;
+    cards = parts.slice(1);
+  }
+  const row = `<div class="cards-row" style="--card-count:${cards.length}">${cards
+    .map((c, i) => `<article class="card" style="--card-i:${i}"${stepAttr(stepped, i)}>${c}</article>`)
+    .join('')}</div>`;
+  return `<div class="cards-deck">${lead ? `<div class="cards-lead">${lead}</div>` : ''}${row}</div>`;
+}
+
+// 対比: 左右2パネルと中央の「vs」。3部以上は2部目以降を右にまとめる。
+function renderCompare(parts: string[], stepped = false): string {
+  if (!parts.length) return '';
+  const a = parts[0] ?? '';
+  const b = parts.length > 2 ? parts.slice(1).join('') : (parts[1] ?? '');
+  return (
+    `<div class="cmp">` +
+    `<div class="cmp-side cmp-a"${stepAttr(stepped, 0)}>${a}</div>` +
+    `<div class="cmp-divider" aria-hidden="true"><span class="cmp-vs">vs</span></div>` +
+    `<div class="cmp-side cmp-b"${stepAttr(stepped, 1)}>${b}</div>` +
+    `</div>`
+  );
+}
+
+// 章扉: 1部=タイトル / 2部=ラベル+タイトル / 3部以上=ラベル+タイトル+リード。
+function renderSection(parts: string[]): string {
+  if (!parts.length) return '';
+  let kicker = '';
+  let title = '';
+  let lede = '';
+  if (parts.length === 1) {
+    title = parts[0]!;
+  } else if (parts.length === 2) {
+    kicker = parts[0]!;
+    title = parts[1]!;
+  } else {
+    kicker = parts[0]!;
+    title = parts[1]!;
+    lede = parts.slice(2).join('');
+  }
+  return (
+    `<div class="section">` +
+    (kicker ? `<div class="section-kicker">${kicker}</div>` : '') +
+    `<div class="section-title">${title}</div>` +
+    `<hr class="section-rule" />` +
+    (lede ? `<div class="section-lede">${lede}</div>` : '') +
+    `</div>`
+  );
+}
+
+// 数値強調: 各部を「大きな数値 + キャプション(+任意の#### 上ラベル)」に分解する。
+function splitFigure(fig: string): string {
+  const m = /^([^\d]*[\d.,]+)\s*(.*)$/.exec(fig);
+  if (m && m[2]) return `${escapeHtml(m[1]!)}<span class="stat-unit">${escapeHtml(m[2]!)}</span>`;
+  return escapeHtml(fig);
+}
+
+function renderStatItem(seg: string): string {
+  const lines = seg.split('\n');
+  let i = 0;
+  while (i < lines.length && !lines[i]!.trim()) i += 1;
+  let kicker = '';
+  const km = i < lines.length ? /^####\s+(.*)$/.exec(lines[i]!.trim()) : null;
+  if (km) {
+    kicker = km[1]!.trim();
+    i += 1;
+  }
+  while (i < lines.length && !lines[i]!.trim()) i += 1;
+  let figure = '';
+  if (i < lines.length) {
+    figure = lines[i]!.trim();
+    i += 1;
+  }
+  figure = figure.replace(/\*\*(.+?)\*\*/g, '$1').trim(); // **123** USD のような太字+単位も剥がす
+  const caption = lines.slice(i).join('\n').trim();
+  if (!figure && !caption) return '';
+  const kick = kicker ? `<p class="stat-kicker">${inline(escapeHtml(kicker))}</p>` : '';
+  const fig = figure ? `<p class="stat-figure">${splitFigure(figure)}</p>` : '';
+  const cap = caption ? `<figcaption class="stat-label">${renderMarkdown(caption)}</figcaption>` : '';
+  return `<figure class="stat">${kick}${fig}${cap}</figure>`;
+}
+
+function renderStats(slide: Slide, stepped = false): string {
+  const cols = slide.columns;
+  if (!cols || !cols.length) return '';
+  let lead = '';
+  let items = cols;
+  if (cols.length >= 2 && /^#{1,2}\s/.test(firstNonEmpty(cols[0]!))) {
+    lead = cols[0]!;
+    items = cols.slice(1);
+  }
+  const cells = items
+    .map(renderStatItem)
+    .filter(Boolean)
+    .map((c, i) => c.replace(/^<figure class="stat"/, `<figure class="stat"${stepAttr(stepped, i)}`));
+  if (!cells.length && !lead) return '';
+  const grid = cells.length ? `<div class="stats-grid" data-n="${cells.length}">${cells.join('')}</div>` : '';
+  return `${lead ? `<div class="stats-lead">${renderMarkdown(lead)}</div>` : ''}${grid}`;
+}
+
+// 大判プルクオート: 末尾のダッシュ行、または === で出典を分ける。
+function renderQuote(slide: Slide): string {
+  const cols = slide.columns && slide.columns.length ? slide.columns : [slide.content];
+  let quote = cols[0] ?? '';
+  let attr = cols.length >= 2 ? cols.slice(1).join('\n').trim() : '';
+  if (!attr) {
+    const lines = quote.split('\n');
+    let a = lines.length - 1;
+    while (a >= 0 && !lines[a]!.trim()) a -= 1;
+    if (a > 0) {
+      const dm = /^\s*[-–—]\s+(.+)$/.exec(lines[a]!);
+      if (dm) {
+        attr = dm[1]!.trim();
+        quote = lines.slice(0, a).join('\n').trim();
+      }
+    }
+  }
+  attr = attr.replace(/^[-–—]\s+/, '').trim();
+  const cap = attr ? `<figcaption class="quote-by">${inline(escapeHtml(attr))}</figcaption>` : '';
+  return `<figure class="quote-block"><blockquote class="quote-text">${renderMarkdown(quote)}</blockquote>${cap}</figure>`;
+}
+
+// 年表: トップレベルの箇条書き1項目=1イベント。`時 === ラベル` で時のチップを分ける。
+function renderTimeline(slide: Slide, stepped = false): string {
+  const lines = slide.content.split('\n');
+  const LIST = /^(\s*)([-*+]|\d+\.)\s+(.*)$/;
+  const indentOf = (s: string): number => (/^(\s*)/.exec(s)?.[1] ?? '').replace(/\t/g, '  ').length;
+
+  const titleLines: string[] = [];
+  let i = 0;
+  let baseIndent = -1;
+  for (; i < lines.length; i += 1) {
+    const m = LIST.exec(lines[i]!);
+    if (m) {
+      baseIndent = m[1]!.replace(/\t/g, '  ').length;
+      break;
+    }
+    titleLines.push(lines[i]!);
+  }
+  if (baseIndent === -1) return renderMarkdown(slide.content);
+
+  const events: { time: string; label: string; body: string[] }[] = [];
+  const dedent = new RegExp(`^\\s{0,${baseIndent + 2}}`);
+  for (; i < lines.length; i += 1) {
+    const line = lines[i]!;
+    const m = LIST.exec(line);
+    if (m && indentOf(line) === baseIndent) {
+      const content = m[3]!;
+      const eq = content.indexOf('===');
+      const time = eq !== -1 ? content.slice(0, eq).trim() : '';
+      const label = eq !== -1 ? content.slice(eq + 3).trim() : content.trim();
+      events.push({ time, label, body: [] });
+    } else if (events.length) {
+      events[events.length - 1]!.body.push(line.trim() === '' ? '' : line.replace(dedent, ''));
+    }
+  }
+
+  const title = titleLines.join('\n').trim() ? renderMarkdown(titleLines.join('\n')) : '';
+  const items = events
+    .map((ev, i) => {
+      const bodyText = ev.body.join('\n').trim();
+      const head =
+        (ev.time ? `<span class="tl-time">${inline(escapeHtml(ev.time))}</span>` : '') +
+        `<h3 class="tl-label">${inline(escapeHtml(ev.label))}</h3>`;
+      const body = bodyText ? `<div class="tl-body">${renderMarkdown(bodyText)}</div>` : '';
+      return `<li class="tl-event"${stepAttr(stepped, i)}><span class="tl-node" aria-hidden="true"></span><div class="tl-content"><div class="tl-head">${head}</div>${body}</div></li>`;
+    })
+    .join('');
+  return `${title}<ol class="timeline-track">${items}</ol>`;
+}
+
+// 画像分割(左/右): 本文最初の画像、または === の媒体部、なければ bg のURLを使う。
+const IMG_RE = /!\[([^\]]*)\]\(([^)\s]+)\)/;
+function extractImage(text: string): { src: string; alt: string; rest: string; matched: string } | null {
+  const m = IMG_RE.exec(text);
+  if (!m) return null;
+  const src = /^(https?:|data:)/.test(m[2]!) ? m[2]! : '';
+  return {
+    src,
+    alt: m[1] ?? '',
+    rest: text.replace(m[0], '').replace(/\n{3,}/g, '\n\n').trim(),
+    matched: m[0],
+  };
+}
+
+function renderMedia(slide: Slide, side: 'left' | 'right'): string {
+  let text: string;
+  let imgText: string;
+  if (slide.columns && slide.columns.length >= 2) {
+    // 画像を含む段を媒体に、残りを本文にする(段の順序に依存しない)。
+    const imgCol = slide.columns.findIndex((c) => IMG_RE.test(c));
+    const mi = imgCol >= 0 ? imgCol : slide.columns.length - 1;
+    imgText = slide.columns[mi] ?? '';
+    text = slide.columns.filter((_, i) => i !== mi).join('\n\n');
+  } else {
+    const ex = extractImage(slide.content);
+    text = ex ? ex.rest : slide.content;
+    imgText = ex ? ex.matched : '';
+  }
+  const ex = extractImage(imgText);
+  let src = ex?.src ?? '';
+  const alt = ex?.alt ?? '';
+  if (!src && slide.background && /^(https?:|data:)/.test(slide.background)) src = slide.background;
+  const media = src
+    ? `<figure class="media-fig" style="background-image:url('${encodeBgUrl(src)}')" role="img" aria-label="${escapeAttr(alt)}"></figure>`
+    : `<figure class="media-fig empty" aria-hidden="true"></figure>`;
+  const body = `<div class="media-body">${renderMarkdown(text)}</div>`;
+  const inner = side === 'left' ? media + body : body + media;
+  return `<div class="media-split media-${side}">${inner}</div>`;
+}
+
+export function slideInnerHtml(slide: Slide): string {
+  return renderBody(slide, false);
 }
 
 // 1枚分のスライド要素。一覧のサムネイルにも使う。
@@ -49,15 +336,9 @@ export function slideHtml(slide: Slide): string {
   );
 }
 
-// 編集ステージ用。各ブロックに data-src(元ソースの範囲)を付けて描画する。
+// 編集ステージ用。段組系の各ブロックに data-src(元ソースの範囲)を付けて描画する。
 export function slideInnerHtmlMapped(slide: Slide): string {
-  if (slide.layout === 'split' && slide.columnLines && slide.columnLines.length > 0) {
-    const cols = slide.columnLines
-      .map((ls) => `<div class="col">${renderMarkdownMapped(ls)}</div>`)
-      .join('');
-    return `<div class="columns">${cols}</div>`;
-  }
-  return renderMarkdownMapped(slide.bodyLines);
+  return renderBody(slide, true);
 }
 
 export function slideHtmlMapped(slide: Slide): string {

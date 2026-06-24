@@ -5,7 +5,9 @@
 // - 座標はスライドに対する百分率(0–100)。16:9 のどの表示サイズでも崩れない。
 // - ブロックは描画順の index で識別する(文字編集では不変、構成変更には弱いが実用的)。
 
-export type ShapeKind = 'rect' | 'ellipse' | 'triangle' | 'line' | 'arrow';
+// 図形の種類。vector は SVG で描く図形、image は src/alt を持つ自由配置の画像。
+export type VectorKind = 'rect' | 'ellipse' | 'triangle' | 'line' | 'arrow';
+export type ShapeKind = VectorKind | 'image';
 
 export interface Box {
   x: number; // 左上X(%)
@@ -14,9 +16,22 @@ export interface Box {
   h: number; // 高さ(%)
 }
 
-export interface Shape extends Box {
+export interface ShapeBase extends Box {
   id: string;
-  kind: ShapeKind;
+}
+export interface VectorShape extends ShapeBase {
+  kind: VectorKind;
+}
+export interface ImageShape extends ShapeBase {
+  kind: 'image';
+  src: string; // dataURL もしくは http(s) URL
+  alt: string; // 代替テキスト
+  ar?: number; // 取り込み時の縦横比 w/h(アスペクト固定リサイズ用)
+}
+export type Shape = VectorShape | ImageShape;
+
+export function isImageShape(s: Shape): s is ImageShape {
+  return s.kind === 'image';
 }
 
 // md ブロックの位置上書き。高さは内容なりなので任意。
@@ -36,21 +51,74 @@ export type Overlay = Record<number, SlideOverlay>; // スライドindex → オ
 
 const KEY = 'maku.overlay';
 
+const SHAPE_KINDS: ShapeKind[] = ['rect', 'ellipse', 'triangle', 'line', 'arrow', 'image'];
+const finite = (v: unknown, fallback = 0): number =>
+  typeof v === 'number' && Number.isFinite(v) ? v : fallback;
+
+// localStorage は書き換えられうるので、読み込み時に型と値を検証して取り込む。
+// 不正な図形(未知の種類・javascript: の src など)は落とし、注入を防ぐ。
+export function sanitizeOverlay(input: unknown): Overlay {
+  if (!input || typeof input !== 'object') return {};
+  const out: Overlay = {};
+  for (const [k, v] of Object.entries(input as Record<string, unknown>)) {
+    const i = Number(k);
+    if (!Number.isInteger(i) || i < 0 || !v || typeof v !== 'object') continue;
+    const slide = v as { blocks?: unknown; shapes?: unknown };
+    const blocks: Record<number, BlockBox> = {};
+    if (slide.blocks && typeof slide.blocks === 'object') {
+      for (const [bk, bv] of Object.entries(slide.blocks as Record<string, unknown>)) {
+        const bi = Number(bk);
+        if (!Number.isInteger(bi) || bi < 0 || !bv || typeof bv !== 'object') continue;
+        const b = bv as Record<string, unknown>;
+        const hasH = typeof b.h === 'number' && Number.isFinite(b.h);
+        const c = clampBox({ x: finite(b.x), y: finite(b.y), w: finite(b.w, 10), h: hasH ? (b.h as number) : 10 });
+        const box: BlockBox = { x: c.x, y: c.y, w: c.w };
+        if (hasH) box.h = c.h;
+        blocks[bi] = box;
+      }
+    }
+    const shapes: Shape[] = [];
+    if (Array.isArray(slide.shapes)) {
+      for (const sv of slide.shapes) {
+        if (!sv || typeof sv !== 'object') continue;
+        const sh = sv as Record<string, unknown>;
+        if (typeof sh.id !== 'string' || !SHAPE_KINDS.includes(sh.kind as ShapeKind)) continue;
+        const base = clampBox({ id: sh.id, x: finite(sh.x), y: finite(sh.y), w: finite(sh.w, 10), h: finite(sh.h, 10) });
+        if (sh.kind === 'image') {
+          const src = typeof sh.src === 'string' && /^(https?:|data:)/.test(sh.src) ? sh.src : '';
+          shapes.push({
+            ...base,
+            kind: 'image',
+            src,
+            alt: typeof sh.alt === 'string' ? sh.alt : '',
+            ...(typeof sh.ar === 'number' && Number.isFinite(sh.ar) && sh.ar > 0 ? { ar: sh.ar } : {}),
+          });
+        } else {
+          shapes.push({ ...base, kind: sh.kind as VectorKind });
+        }
+      }
+    }
+    out[i] = { blocks, shapes };
+  }
+  return out;
+}
+
 export function loadOverlay(): Overlay {
   try {
     const raw = localStorage.getItem(KEY);
-    const o = raw ? (JSON.parse(raw) as Overlay) : {};
-    return o && typeof o === 'object' ? o : {};
+    return raw ? sanitizeOverlay(JSON.parse(raw)) : {};
   } catch {
     return {};
   }
 }
 
-export function saveOverlay(o: Overlay): void {
+// 保存の成否を返す。画像など容量超過(QuotaExceededError)をUI側で知らせるため。
+export function saveOverlay(o: Overlay): boolean {
   try {
     localStorage.setItem(KEY, JSON.stringify(o));
+    return true;
   } catch {
-    // 保存失敗は無視
+    return false;
   }
 }
 
@@ -93,7 +161,7 @@ export function reindexAfterDelete(blocks: Record<number, BlockBox>, removed: nu
 
 // 図形1つの内側SVG。viewBox を 0..100 に取り、preserveAspectRatio=none で箱に引き伸ばす。
 // 線幅は vector-effect=non-scaling-stroke で一定に保つ。色は currentColor(テーマのアクセント)。
-export function shapeInnerSvg(kind: ShapeKind): string {
+export function shapeInnerSvg(kind: VectorKind): string {
   const open = '<svg viewBox="0 0 100 100" preserveAspectRatio="none" width="100%" height="100%">';
   const fillCommon = 'fill="currentColor" fill-opacity="0.14" stroke="currentColor" stroke-width="2" vector-effect="non-scaling-stroke"';
   const lineCommon = 'stroke="currentColor" stroke-width="2.5" vector-effect="non-scaling-stroke" stroke-linecap="round"';
@@ -121,7 +189,9 @@ export function shapeInnerSvg(kind: ShapeKind): string {
 }
 
 export function shapeLabel(kind: ShapeKind): string {
-  return { rect: '四角形', ellipse: '円・楕円', triangle: '三角形', line: '直線', arrow: '矢印' }[kind];
+  return { rect: '四角形', ellipse: '円・楕円', triangle: '三角形', line: '直線', arrow: '矢印', image: '画像' }[
+    kind
+  ];
 }
 
 // 描画済みスライド要素にオーバーレイを反映する。
@@ -158,9 +228,21 @@ export function applyOverlay(slideEl: Element, ov: SlideOverlay): void {
     slideEl.appendChild(layer);
   }
   layer.innerHTML = ov.shapes
-    .map(
-      (s) =>
-        `<div class="ov-shape ov-shape-${s.kind}" data-sid="${s.id}" style="left:${s.x}%;top:${s.y}%;width:${s.w}%;height:${s.h}%">${shapeInnerSvg(s.kind)}</div>`,
-    )
+    .map((s) => {
+      const pos = `left:${s.x}%;top:${s.y}%;width:${s.w}%;height:${s.h}%`;
+      if (s.kind === 'image') {
+        const safe = /^(https?:|data:)/.test(s.src) ? s.src : '';
+        return (
+          `<div class="ov-shape ov-shape-image" data-sid="${attrEsc(s.id)}" style="${pos}">` +
+          `<img src="${attrEsc(safe)}" alt="${attrEsc(s.alt)}" draggable="false" /></div>`
+        );
+      }
+      return `<div class="ov-shape ov-shape-${s.kind}" data-sid="${attrEsc(s.id)}" style="${pos}">${shapeInnerSvg(s.kind)}</div>`;
+    })
     .join('');
+}
+
+// 属性値エスケープ。src/alt/id を style/属性から脱出させない。
+function attrEsc(v: string): string {
+  return v.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
