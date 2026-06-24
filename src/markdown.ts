@@ -2,26 +2,50 @@
 // タスクリスト・引用・コードブロック・表・水平線・強調/コード/リンク/画像に対応する。
 // HTMLは先にエスケープし、許可した記法だけを後から復元する。
 
-function escapeHtml(s: string): string {
+import type { SlideStep } from './deck';
+
+export function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+// 属性値用の追加エスケープ。本文は先にescapeHtmlで &<> を処理済みなので、
+// ここでは属性を抜け出せる引用符だけを潰せばよい。
+function escapeAttr(s: string): string {
+  return s.replace(/"/g, '&quot;');
+}
+
 // インライン記法。入力はエスケープ済みであること。
+// コード `…` は先に取り出して退避し、リンク化・強調などに巻き込まれないようにする
+// (例: `[x](y)` の中身が誤ってリンクにならない)。最後にプレースホルダを戻す。
 export function inline(text: string): string {
-  return text
-    .replace(/`([^`]+)`/g, (_m, code: string) => `<code>${code}</code>`)
+  // \u9000\u907F\u9818\u57DF\u3002\u30B3\u30FC\u30C9\u306E\u4E2D\u8EAB\u3001\u753B\u50CF\u30BF\u30B0\u3001\u30EA\u30F3\u30AF\u306E\u5C5E\u6027\u90E8\u3092\u4E00\u65E6\u30D7\u30EC\u30FC\u30B9\u30DB\u30EB\u30C0\u306B\u9003\u304C\u3057\u3001
+  // \u5F8C\u6BB5\u306E\u5F37\u8ABF\u8A18\u6CD5(*,_,**,~~)\u306B\u5DFB\u304D\u8FBC\u307E\u308C\u306A\u3044\u3088\u3046\u306B\u3059\u308B(\u4F8B: target="_blank" \u306E _ \u3084
+  // URL\u4E2D\u306E * \u304C\u8AA4\u3063\u3066\u5F37\u8ABF\u5316\u3055\u308C\u308B\u306E\u3092\u9632\u3050)\u3002\u6700\u5F8C\u306B\u623B\u3059(\u5165\u308C\u5B50\u3076\u3093\u6570\u56DE)\u3002
+  const stash: string[] = [];
+  const hold = (html: string): string => `\uE000${stash.push(html) - 1}\uE000`;
+  let s = text
+    .replace(/\uE000/g, '') // \u5165\u529B\u306B\u7D1B\u308C\u305F\u756A\u5175\u306F\u9664\u53BB(\u8AA4\u5FA9\u5143\u30FBundefined\u6DF7\u5165\u3092\u9632\u3050)
+    .replace(/`([^`]+)`/g, (_m, code: string) => hold(`<code>${code}</code>`))
     .replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_m, alt: string, src: string) => {
       const safe = /^(https?:|data:)/.test(src) ? src : '';
-      return `<img src="${safe}" alt="${alt}" loading="lazy" />`;
+      return hold(
+        `<img src="${escapeAttr(safe)}" alt="${escapeAttr(alt)}" loading="lazy" decoding="async" />`,
+      );
     })
+    // \u30EA\u30F3\u30AF\u306F\u5C5E\u6027\u90E8\u3060\u3051\u9000\u907F\u3057\u3001\u30E9\u30D9\u30EB\u306F\u5F37\u8ABF\u51E6\u7406\u3092\u52B9\u304B\u305B\u308B([**\u592A\u5B57**](url) \u7B49)\u3002
     .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_m, label: string, href: string) => {
       const safe = /^(https?:|mailto:|#)/.test(href) ? href : '#';
-      return `<a href="${safe}" rel="noopener">${label}</a>`;
+      const ext = /^https?:/.test(safe) ? ' target="_blank" rel="noopener noreferrer"' : '';
+      return `<a${hold(` href="${escapeAttr(safe)}"${ext}`)}>${label}</a>`;
     })
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
     .replace(/~~([^~]+)~~/g, '<del>$1</del>')
     .replace(/(^|[^*])\*([^*\s][^*]*)\*/g, '$1<em>$2</em>')
     .replace(/(^|[^_])_([^_\s][^_]*)_/g, '$1<em>$2</em>');
+  for (let k = 0; k < 5 && s.includes('\uE000'); k += 1) {
+    s = s.replace(/\uE000(\d+)\uE000/g, (m, i: string) => stash[Number(i)] ?? m);
+  }
+  return s;
 }
 
 interface Cursor {
@@ -30,6 +54,9 @@ interface Cursor {
   // 指定時、トップレベルの各ブロックに data-src="start-end"(文書中の絶対オフセット)を付ける。
   // view側で編集したブロックを、Markdown原文の正しい範囲へ書き戻すための逆引きに使う。
   offsets?: number[];
+  // 指定時、トップレベルの各ブロックに data-step / data-key(段階表示)を付ける。
+  steps?: SlideStep[];
+  ord?: number; // 何番目のトップレベルブロックか(steps の添字)
 }
 
 const LIST_RE = /^(\s*)([-*+]|\d+\.)\s+(.*)$/;
@@ -45,10 +72,16 @@ export function renderMarkdown(src: string): string {
 }
 
 // 絶対オフセット付きの行配列から描画し、トップレベルのブロックに data-src を付ける版。
-export function renderMarkdownMapped(src: { text: string; offset: number }[]): string {
+// steps を渡すと各トップレベルブロックに data-step / data-key(段階表示)も付ける。
+export function renderMarkdownMapped(
+  src: { text: string; offset: number }[],
+  steps?: SlideStep[],
+): string {
   const cur: Cursor = {
     lines: src.map((l) => l.text),
     offsets: src.map((l) => l.offset),
+    steps,
+    ord: 0,
     i: 0,
   };
   return blocks(cur, 0);
@@ -98,15 +131,27 @@ function blocks(cur: Cursor, minIndent: number): string {
 }
 
 // 1ブロックが消費した行(末尾の空行は除く)の絶対範囲を、最初のタグに data-src として付ける。
+// steps があれば data-step / data-key(段階表示)も同じタグに付ける。
 function withSource(html: string, cur: Cursor, startLine: number): string {
   const offsets = cur.offsets!;
+  const ord = cur.ord ?? 0;
+  cur.ord = ord + 1;
   let endLine = cur.i;
   while (endLine > startLine && cur.lines[endLine - 1]!.trim() === '') endLine -= 1;
-  if (endLine <= startLine) return html;
-  const last = endLine - 1;
-  const start = offsets[startLine]!;
-  const end = offsets[last]! + cur.lines[last]!.length;
-  return html.replace(/^(\s*<[a-zA-Z][\w-]*)/, `$1 data-src="${start}-${end}"`);
+  let attrs = '';
+  if (endLine > startLine) {
+    const last = endLine - 1;
+    const start = offsets[startLine]!;
+    const end = offsets[last]! + cur.lines[last]!.length;
+    attrs += ` data-src="${start}-${end}"`;
+  }
+  const st = cur.steps?.[ord];
+  if (st) {
+    attrs += ` data-step="${st.step}"`;
+    if (st.key) attrs += ' data-key="1"';
+  }
+  if (!attrs) return html;
+  return html.replace(/^(\s*<[a-zA-Z][\w-]*)/, `$1${attrs}`);
 }
 
 function codeBlock(cur: Cursor, mark: string, lang: string): string {
@@ -221,4 +266,37 @@ function paragraph(cur: Cursor, minIndent: number): string {
     cur.i += 1;
   }
   return `<p>${buf.map((l) => inline(escapeHtml(l))).join('<br />')}</p>`;
+}
+
+// トップレベルブロックの開始行インデックスを順に返す。段階表示のステップ割当を、
+// 実際に描画されるブロックと1対1で一致させるための単一の真実源。
+// blocks() と同じ走査・消費(フェンス内は飛ばす等)を使う。
+export function topLevelBlockStarts(lines: string[]): number[] {
+  const cur: Cursor = { lines, i: 0 };
+  const starts: number[] = [];
+  while (cur.i < cur.lines.length) {
+    if (cur.lines[cur.i]!.trim() === '') {
+      cur.i += 1;
+      continue;
+    }
+    starts.push(cur.i);
+    consumeBlock(cur);
+  }
+  return starts;
+}
+
+// 1つのトップレベルブロックぶんだけカーソルを進める(blocks() と同じ分岐)。
+function consumeBlock(cur: Cursor): void {
+  const before = cur.i;
+  const line = cur.lines[cur.i]!;
+  const fence = /^(\s*)(```|~~~)\s*([\w-]*)\s*$/.exec(line);
+  const heading = /^(#{1,6})\s+(.*)$/.exec(line);
+  if (fence) codeBlock(cur, fence[2]!, fence[3] ?? '');
+  else if (heading) cur.i += 1;
+  else if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) cur.i += 1;
+  else if (/^\s*>\s?/.test(line)) blockquote(cur);
+  else if (LIST_RE.test(line)) list(cur, indentOf(line));
+  else if (isTableStart(cur)) table(cur);
+  else paragraph(cur, 0);
+  if (cur.i === before) cur.i += 1; // 無限ループ防止
 }

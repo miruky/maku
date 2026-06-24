@@ -2,20 +2,20 @@ import { describe, expect, it } from 'vitest';
 import { THEMES, themeById, varContrast, DEFAULT_THEME_ID } from './themes';
 
 describe('THEMES', () => {
-  it('ちょうど100種類ある', () => {
-    expect(THEMES).toHaveLength(100);
+  it('ちょうど264種類ある(44系統 × 昼夜 × 3書体)', () => {
+    expect(THEMES).toHaveLength(264);
   });
 
   it('idは一意', () => {
-    expect(new Set(THEMES.map((t) => t.id)).size).toBe(100);
+    expect(new Set(THEMES.map((t) => t.id)).size).toBe(264);
   });
 
   it('名前も一意', () => {
-    expect(new Set(THEMES.map((t) => t.name)).size).toBe(100);
+    expect(new Set(THEMES.map((t) => t.name)).size).toBe(264);
   });
 
   it('昼夜が半々', () => {
-    expect(THEMES.filter((t) => t.dark)).toHaveLength(50);
+    expect(THEMES.filter((t) => t.dark)).toHaveLength(132);
   });
 
   it('各テーマに必須のCSS変数が揃う', () => {
@@ -41,6 +41,12 @@ describe('THEMES', () => {
       expect(varContrast(t, '--fg'), `${t.id} fg/bg`).toBeGreaterThanOrEqual(4.5);
       expect(varContrast(t, '--accent'), `${t.id} accent/bg`).toBeGreaterThanOrEqual(4.5);
       expect(varContrast(t, '--muted'), `${t.id} muted/bg`).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it('全テーマで本文色が accent-soft 上でも AA(対比バッジ等の文字用)', () => {
+    for (const t of THEMES) {
+      expect(varContrast(t, '--fg', '--accent-soft'), `${t.id} fg/accent-soft`).toBeGreaterThanOrEqual(4.5);
     }
   });
 });

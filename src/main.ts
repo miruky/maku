@@ -6,14 +6,16 @@ import {
   applyOverlay,
   clampBox,
   ensureSlide,
+  isImageShape,
   loadOverlay,
   newId,
   reindexAfterDelete,
   saveOverlay,
   slideOverlay,
   type Box,
+  type ImageShape,
   type Shape,
-  type ShapeKind,
+  type VectorKind,
 } from './overlay';
 import { slideHtml } from './render';
 import { Presenter } from './present';
@@ -44,15 +46,69 @@ theme: ${DEFAULT_THEME_ID}
 
 ---
 
-<!-- incremental -->
+<!-- reveal: key-first -->
 
-## 一つずつ見せる
+# 要点から、順に。
 
-\`<!-- incremental -->\` を置くと、
+\`<!-- reveal: key-first -->\` で、
 
-矢印キーで
+まずキーメッセージを見せて、
 
-ひとつずつ現れます。
+それから詳細を一つずつ。
+
+---
+
+<!-- layout: section -->
+
+02
+===
+# レイアウトいろいろ
+===
+14種類。\`<!-- layout: 名前 -->\` で切り替えられます。
+
+---
+
+<!-- layout: stats -->
+
+# 数字で見せる
+
+===
+
+#### テーマ
+264
+
+===
+
+#### レイアウト
+14
+
+===
+
+#### 実行時依存
+0
+
+---
+
+<!-- layout: split -->
+
+## 左右に並べる
+
+\`layout: split\` と \`===\` で段組に。
+
+===
+
+### 右側
+
+- 比較に便利
+- 図と説明を並べる
+
+---
+
+<!-- layout: quote -->
+
+シンプルさは、**究極の洗練**である。
+
+— レオナルド・ダ・ヴィンチ
 
 ---
 
@@ -71,18 +127,10 @@ export function greet(name: string) {
 
 ---
 
-<!-- layout: split -->
+## 画像も置ける
 
-## 左右に並べる
-
-\`layout: split\` と \`===\` で段組に。
-
-===
-
-### 右側
-
-- 比較に便利
-- 図と説明を並べる
+ツールバーの画像ボタン・ドラッグ&ドロップ・貼り付けで取り込めます。
+**Markdown に挿入**するか、**スライドに自由配置**するかを選べます。
 
 ---
 
@@ -186,7 +234,7 @@ app.innerHTML = `
     <div class="overlay-head">
       <div class="head-titles">
         <span class="kicker">Theme</span>
-        <span class="head-title">テーマ<span class="head-sub">100種類</span></span>
+        <span class="head-title">テーマ<span class="head-sub">${THEMES.length}種類</span></span>
       </div>
       <input id="theme-search" type="search" placeholder="色名で絞り込み" aria-label="テーマ検索" />
       <button class="mini" data-close="theme-modal">閉じる</button>
@@ -208,10 +256,24 @@ app.innerHTML = `
         <dt>E</dt><dd>編集パネル</dd>
         <dt>T</dt><dd>テーマ選択</dd>
         <dt>P</dt><dd>書き出し(PDF / PPTX / Google)</dd>
-        <dt>Esc</dt><dd>パネルを閉じる</dd>
+        <dt>Esc</dt><dd>パネル・全画面を閉じる</dd>
       </dl>
-      <p class="help-note">スライド上の文字を直接クリックすると、その場で書き換えられます。編集はMarkdown側にも即座に反映され、左右どちらからでも編集できます(ツールバーの「スライドを直接編集」で切替)。</p>
-      <button class="mini" data-close="help-overlay">閉じる</button>
+      <span class="kicker">Syntax</span>
+      <h2>書き方</h2>
+      <dl>
+        <dt>---</dt><dd>スライド区切り</dd>
+        <dt>&lt;!-- layout: … --&gt;</dt><dd>レイアウト(grid/cards/stats/timeline/quote/section/compare/split/image-left/image-right/center/title/full)</dd>
+        <dt>===</dt><dd>段組・グリッド・各段の区切り</dd>
+        <dt>&lt;!-- reveal: key-first --&gt;</dt><dd>要点を先に、段階表示</dd>
+        <dt>&lt;!-- key --&gt; / &lt;!-- step: N --&gt;</dt><dd>段階表示マーカー(次のブロックに付与)</dd>
+        <dt>&lt;!-- bg: 色/URL --&gt;</dt><dd>背景(色または画像)</dd>
+        <dt>???</dt><dd>発表者ノート</dd>
+      </dl>
+      <p class="help-note">スライド上の文字を直接クリックするとその場で書き換えられ、Markdown側にも即時反映されます(ツールバーの「スライドを直接編集」で切替)。画像はツールバーの画像ボタン・ドラッグ&amp;ドロップ・貼り付けで取り込め、Markdown挿入か自由配置かを選べます。</p>
+      <div class="help-actions">
+        <button class="mini" id="load-sample">サンプルを読み込む</button>
+        <button class="mini" data-close="help-overlay">閉じる</button>
+      </div>
     </div>
   </div>
 
@@ -255,6 +317,8 @@ app.innerHTML = `
   </div>
 
   <div class="toast-wrap" id="toast-wrap" aria-live="polite"></div>
+
+  <div id="live-region" class="sr-only" aria-live="polite" role="status"></div>
 
   <div id="print-deck" aria-hidden="true"></div>
 `;
@@ -315,6 +379,8 @@ const presenter = new Presenter(
   { stage, progress: $('progress'), counter: $('counter'), notes: $('notes-body') },
   (i) => {
     if (location.hash !== `#${i + 1}`) history.replaceState(null, '', `#${i + 1}${themeQuery()}`);
+    const lr = document.getElementById('live-region');
+    if (lr) lr.textContent = `スライド ${i + 1} / ${presenter.total}`;
   },
   () => decorateStage(),
 );
@@ -409,10 +475,57 @@ insertBar.innerHTML = `
   <button data-insert="triangle" title="三角形" aria-label="三角形"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M12 5l8 14H4z"/></svg></button>
   <button data-insert="line" title="直線" aria-label="直線"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M5 19L19 5"/></svg></button>
   <button data-insert="arrow" title="矢印" aria-label="矢印"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 19L18 6M10 6h8v8"/></svg></button>
+  <button data-insert="image" title="画像を取り込む" aria-label="画像を取り込む"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.6"/><path d="M21 15l-5-4-11 8"/></svg></button>
   <span class="insert-sep"></span>
   <button data-insert="delete" title="選択を削除 (Delete)" aria-label="削除"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M5 7h14M10 7V5h4v2M8 7l1 13h6l1-13"/></svg></button>
 `;
 deckRoot.appendChild(insertBar);
+
+// 画像取り込み用の隠しファイル入力と、インライン/自由配置の選択メニュー。
+const imgFile = document.createElement('input');
+imgFile.type = 'file';
+imgFile.accept = 'image/*';
+imgFile.multiple = true;
+imgFile.hidden = true;
+deckRoot.appendChild(imgFile);
+
+const imgChooser = document.createElement('div');
+imgChooser.className = 'menu img-chooser';
+imgChooser.hidden = true;
+imgChooser.innerHTML =
+  '<button data-mode="free">スライドに自由配置</button>' +
+  '<button data-mode="inline">Markdown に挿入</button>';
+deckRoot.appendChild(imgChooser);
+
+let pendingImages: File[] = [];
+function openImagePicker(): void {
+  imgFile.value = '';
+  imgFile.click();
+}
+imgFile.addEventListener('change', () => {
+  const files = Array.from(imgFile.files ?? []).filter((f) => f.type.startsWith('image/'));
+  if (!files.length) return;
+  pendingImages = files;
+  imgChooser.hidden = false;
+});
+imgChooser.addEventListener('click', (e) => {
+  const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-mode]');
+  if (!btn) return;
+  const mode = btn.dataset.mode === 'inline' ? 'inline' : 'free';
+  imgChooser.hidden = true;
+  const files = pendingImages;
+  pendingImages = [];
+  files.forEach((f, i) => {
+    const at = mode === 'free' ? { x: 50 + i * 4, y: 46 + i * 4 } : undefined;
+    void importImageFile(f, mode, at);
+  });
+});
+document.addEventListener('click', (e) => {
+  const t = e.target as HTMLElement;
+  if (!imgChooser.hidden && !t.closest('.img-chooser') && !t.closest('[data-insert="image"]')) {
+    imgChooser.hidden = true;
+  }
+});
 
 function slideEl(): HTMLElement | null {
   return stage.querySelector<HTMLElement>('.slide');
@@ -582,6 +695,17 @@ deckRoot.addEventListener('pointermove', (e) => {
   } else {
     box = resizeBox(drag.box, drag.handle, dx, dy);
     resizingHeight = drag.handle.includes('n') || drag.handle.includes('s');
+    // 画像は縦横比を保つ(Shiftで自由変形)。北側ハンドルは下端を固定する。
+    if (sel.kind === 'shape') {
+      const sh = findShape(sel.id);
+      if (sh && isImageShape(sh) && sh.ar && !e.shiftKey) {
+        const bottom = box.y + box.h;
+        const h = (box.w * (16 / 9)) / sh.ar;
+        if (drag.handle.includes('n')) box.y = bottom - h;
+        box.h = h;
+        resizingHeight = true;
+      }
+    }
   }
   applyBox(clampBox(box), resizingHeight);
 });
@@ -684,13 +808,13 @@ function flushView(): void {
 }
 
 // ── 挿入(テキストは md へ、図形は overlay のみ)──
-function defaultShapeBox(kind: ShapeKind): Box {
+function defaultShapeBox(kind: VectorKind): Box {
   if (kind === 'line' || kind === 'arrow') return { x: 28, y: 47, w: 44, h: 6 };
   if (kind === 'ellipse') return { x: 34, y: 33, w: 32, h: 30 };
   return { x: 34, y: 33, w: 32, h: 28 };
 }
 
-function insertShape(kind: ShapeKind): void {
+function insertShape(kind: VectorKind): void {
   const o = ensureSlide(overlay, presenter.index);
   const shape: Shape = { id: newId(), kind, ...defaultShapeBox(kind) };
   o.shapes.push(shape);
@@ -698,6 +822,92 @@ function insertShape(kind: ShapeKind): void {
   decorateStage();
   const el = stage.querySelector<HTMLElement>(`.ov-shape[data-sid="${shape.id}"]`);
   if (el) selectShape(el);
+}
+
+// ── 画像のインポート(インライン=Markdown / 自由配置=オーバーレイ)──
+const MAX_IMG_BYTES = 8 * 1024 * 1024; // これを超える画像は localStorage を壊すので拒否
+const WARN_IMG_BYTES = 2.5 * 1024 * 1024;
+
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result));
+    r.onerror = () => reject(r.error ?? new Error('読み込み失敗'));
+    r.readAsDataURL(file);
+  });
+}
+
+async function importImageFile(file: File, mode: 'free' | 'inline', at?: { x: number; y: number }): Promise<void> {
+  if (!file.type.startsWith('image/')) {
+    toast('画像ファイルではありません');
+    return;
+  }
+  if (file.size > MAX_IMG_BYTES) {
+    toast('画像が大きすぎます(8MBまで)。縮小してから取り込んでください');
+    return;
+  }
+  try {
+    const dataUrl = await fileToDataUrl(file);
+    if (mode === 'inline') addInlineImage(dataUrl, file.name.replace(/\.[^.]+$/, ''));
+    else addFreeImage(dataUrl, '', at);
+    if (file.size > WARN_IMG_BYTES) toast('大きめの画像です。保存できない場合は縮小してください');
+  } catch {
+    toast('画像の読み込みに失敗しました');
+  }
+}
+
+// 画像の自然な縦横比から、16:9スライド上での箱(%)を作る。正方形は正方形に見える。
+function imageBox(ar: number, at?: { x: number; y: number }): Box {
+  const a = ar > 0 ? ar : 1;
+  let w = 40;
+  let h = (w * (16 / 9)) / a;
+  // 縦長で枠を超える場合は、縦横比を保ったまま幅を縮める(切り抜きを防ぐ)。
+  if (h > 92) {
+    h = 92;
+    w = (h * a * 9) / 16;
+  }
+  const x = at ? at.x - w / 2 : (100 - w) / 2;
+  const y = at ? at.y - h / 2 : (100 - h) / 2;
+  return clampBox({ x, y, w, h });
+}
+
+function addFreeImage(src: string, alt: string, at?: { x: number; y: number }): void {
+  const probe = new Image();
+  const place = (ar: number): void => {
+    const o = ensureSlide(overlay, presenter.index);
+    const box = imageBox(ar, at);
+    const shape: ImageShape = { id: newId(), kind: 'image', src, alt, ar, ...box };
+    o.shapes.push(shape);
+    if (!saveOverlay(overlay)) {
+      o.shapes.pop();
+      toast('保存容量を超えました。画像を縮小するか、数を減らしてください');
+      return;
+    }
+    decorateStage();
+    const el = stage.querySelector<HTMLElement>(`.ov-shape[data-sid="${shape.id}"]`);
+    if (el) selectShape(el);
+    toast('画像を配置しました');
+  };
+  probe.onload = () => place(probe.naturalWidth / probe.naturalHeight || 1);
+  probe.onerror = () => place(1);
+  probe.src = src;
+}
+
+function addInlineImage(dataUrl: string, alt: string): void {
+  const deck = parseDeck(mdInput.value);
+  const slide = deck.slides[presenter.index];
+  const lines = slide?.bodyLines ?? [];
+  const at = lines.length
+    ? lines[lines.length - 1]!.offset + lines[lines.length - 1]!.text.length
+    : mdInput.value.length;
+  const before = mdInput.value.slice(0, at);
+  // alt に ] や ) が混ざると画像記法が壊れるので無害化する。
+  const safeAlt = alt.replace(/[[\]()\n`]/g, ' ').trim();
+  const md = `![${safeAlt}](${dataUrl})`;
+  mdInput.value = before + (before === '' || before.endsWith('\n') ? '\n' : '\n\n') + md + mdInput.value.slice(at);
+  persistMd();
+  rebuild(true);
+  toast('Markdown に画像を挿入しました');
 }
 
 function insertTextBox(): void {
@@ -768,8 +978,9 @@ insertBar.addEventListener('click', (e) => {
   if (!btn) return;
   const what = btn.dataset.insert!;
   if (what === 'text') insertTextBox();
+  else if (what === 'image') openImagePicker();
   else if (what === 'delete') deleteSelection();
-  else insertShape(what as ShapeKind);
+  else insertShape(what as VectorKind);
 });
 
 // 描画のたびに編集の見た目と選択枠を更新する(Presenter から onAfterRender 経由)。
@@ -807,6 +1018,7 @@ function setLiveEdit(on: boolean): void {
     // 保存失敗は無視
   }
   $('live-edit').classList.toggle('on', on);
+  $('live-edit').setAttribute('aria-pressed', String(on));
   if (!on) {
     commitEdit();
     deselect();
@@ -816,13 +1028,26 @@ function setLiveEdit(on: boolean): void {
 
 // 発表(全画面)中は直接編集を止める。
 document.addEventListener('fullscreenchange', () => {
-  presenting = !!document.fullscreenElement;
+  presenting = !!document.fullscreenElement || faux;
   if (presenting) {
     commitEdit();
     deselect();
   }
   decorateStage();
 });
+
+// requestFullscreen が無い環境(iOS Safari など)向けの擬似全画面。
+let faux = false;
+function fauxFull(on: boolean): void {
+  faux = on;
+  document.body.classList.toggle('faux-full', on);
+  presenting = on;
+  if (on) {
+    commitEdit();
+    deselect();
+  }
+  decorateStage();
+}
 
 // 選択枠はスライドの表示サイズ変化に追従させる。
 new ResizeObserver(() => positionFrame()).observe(deckRoot);
@@ -855,17 +1080,29 @@ rebuild(false);
 $('next').addEventListener('click', () => nav(() => presenter.next()));
 $('prev').addEventListener('click', () => nav(() => presenter.prev()));
 
-mdInput.addEventListener('input', () => rebuild(true));
+// 入力のたびに全体を再パース/再描画するのは重いので、軽くデバウンスする。
+let rebuildTimer = 0;
+mdInput.addEventListener('input', () => {
+  window.clearTimeout(rebuildTimer);
+  rebuildTimer = window.setTimeout(() => rebuild(true), 120);
+});
 
 // 直接編集トグル(既定はオン)。
 $('live-edit').classList.toggle('on', liveEdit);
+$('live-edit').setAttribute('aria-pressed', String(liveEdit));
 $('live-edit').addEventListener('click', () => setLiveEdit(!liveEdit));
 
 // ── パネル開閉 ──
+const PANEL_BTN: Record<string, string> = { editor: 'edit', 'notes-panel': 'notes-btn' };
 function toggle(id: string, force?: boolean): void {
   const el = $(id);
   el.hidden = force === undefined ? !el.hidden : !force;
-  if (id === 'editor') $('edit').classList.toggle('on', !el.hidden);
+  const btnId = PANEL_BTN[id];
+  if (btnId) {
+    const on = !el.hidden;
+    $(btnId).classList.toggle('on', on);
+    $(btnId).setAttribute('aria-pressed', String(on));
+  }
 }
 $('edit').addEventListener('click', () => toggle('editor'));
 // 既定で編集パネルを開いておく。横並びで原稿とプレビューを見渡せて書き始めやすい。
@@ -881,14 +1118,29 @@ $('theme-btn').addEventListener('click', () => {
   toggle('theme-modal', true);
 });
 $('help-btn').addEventListener('click', () => toggle('help-overlay', true));
+$('load-sample').addEventListener('click', () => {
+  mdInput.value = SAMPLE;
+  rebuild(false);
+  toggle('help-overlay', false);
+  toast('サンプルを読み込みました');
+});
 app.querySelectorAll<HTMLElement>('[data-close]').forEach((b) =>
   b.addEventListener('click', () => toggle(b.dataset.close!, false)),
 );
 
 // ── 全画面 ──
 $('present').addEventListener('click', () => {
-  if (document.fullscreenElement) void document.exitFullscreen();
-  else void deckRoot.requestFullscreen?.();
+  if (faux) {
+    fauxFull(false);
+    return;
+  }
+  if (document.fullscreenElement) {
+    void document.exitFullscreen();
+    return;
+  }
+  const req = deckRoot.requestFullscreen?.bind(deckRoot);
+  if (req) req().catch(() => fauxFull(true));
+  else fauxFull(true);
 });
 
 // ── 書き出し ──
@@ -1019,9 +1271,48 @@ async function loadFile(file: File): Promise<void> {
 ['dragover', 'drop'].forEach((type) => {
   deckRoot.addEventListener(type, (e) => e.preventDefault());
 });
+function dropPercent(e: DragEvent): { x: number; y: number } {
+  const r = (slideEl() ?? stage).getBoundingClientRect();
+  return { x: ((e.clientX - r.left) / r.width) * 100, y: ((e.clientY - r.top) / r.height) * 100 };
+}
 deckRoot.addEventListener('drop', (e) => {
-  const file = (e as DragEvent).dataTransfer?.files?.[0];
-  if (file) void loadFile(file);
+  const dt = (e as DragEvent).dataTransfer;
+  if (!dt) return;
+  const files = Array.from(dt.files);
+  const images = files.filter((f) => f.type.startsWith('image/'));
+  if (images.length) {
+    if (!liveEdit || presenting) {
+      toast('「スライドを直接編集」をオンにすると画像を配置できます');
+      return;
+    }
+    const at = dropPercent(e as DragEvent);
+    images.forEach((f, i) => void importImageFile(f, 'free', { x: at.x + i * 4, y: at.y + i * 4 }));
+    return;
+  }
+  const md = files.find((f) => /\.(md|markdown|txt)$/i.test(f.name) || f.type.startsWith('text/'));
+  if (md) {
+    void loadFile(md);
+    return;
+  }
+  const uri = (dt.getData('text/uri-list') || dt.getData('text/plain')).trim();
+  if (/^https?:\/\//.test(uri) && liveEdit && !presenting) addFreeImage(uri, '', dropPercent(e as DragEvent));
+});
+
+// クリップボードの画像を貼り付けで自由配置(エディタ/直接編集中の入力は邪魔しない)。
+window.addEventListener('paste', (e) => {
+  const t = e.target as HTMLElement | null;
+  if (t && (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT' || t.isContentEditable)) return;
+  if (!liveEdit || presenting) return;
+  for (const it of Array.from(e.clipboardData?.items ?? [])) {
+    if (it.type.startsWith('image/')) {
+      const file = it.getAsFile();
+      if (file) {
+        e.preventDefault();
+        void importImageFile(file, 'free', { x: 50, y: 47 });
+        return;
+      }
+    }
+  }
 });
 
 // ── リンク共有 ──
@@ -1170,6 +1461,7 @@ window.addEventListener('keydown', (ev) => {
       toggle('help-overlay', true);
       break;
     case 'Escape':
+      if (faux) fauxFull(false);
       ['overview-overlay', 'theme-modal', 'help-overlay', 'gslides-modal'].forEach((id) =>
         toggle(id, false),
       );
@@ -1178,17 +1470,31 @@ window.addEventListener('keydown', (ev) => {
   }
 });
 
-// スワイプ
+// スワイプ。横移動が主のときだけ移動し、編集中のブロック/図形上では無効にする
+// (ドラッグ操作と衝突しないように)。
 let touchX = 0;
-deckRoot.addEventListener('touchstart', (e) => (touchX = e.changedTouches[0]!.clientX), {
-  passive: true,
-});
+let touchY = 0;
+let touchEditable = false;
+deckRoot.addEventListener(
+  'touchstart',
+  (e) => {
+    touchX = e.changedTouches[0]!.clientX;
+    touchY = e.changedTouches[0]!.clientY;
+    const t = e.target as HTMLElement;
+    touchEditable =
+      liveEdit && !presenting && !!(t.closest('[data-src]') || t.closest('.ov-shape') || t.closest('.sel-h'));
+  },
+  { passive: true },
+);
 deckRoot.addEventListener(
   'touchend',
   (e) => {
+    if (touchEditable) return;
     const dx = e.changedTouches[0]!.clientX - touchX;
-    if (dx < -50) nav(() => presenter.next());
-    else if (dx > 50) nav(() => presenter.prev());
+    const dy = e.changedTouches[0]!.clientY - touchY;
+    if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy) * 1.4) return;
+    if (dx < 0) nav(() => presenter.next());
+    else nav(() => presenter.prev());
   },
   { passive: true },
 );

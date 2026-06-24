@@ -296,16 +296,33 @@ body {
   font-size: 3.5cqh;
   line-height: 1.7;
   width: 100%;
+  /* 長いURL・コード・連続文字がスライド枠をはみ出さないように折り返す。 */
+  overflow-wrap: anywhere;
 }
 
 .stage.enter .slide {
-  animation: slide-in 0.42s var(--ease) both;
+  animation: slide-in 0.4s var(--ease) both;
+}
+
+.stage.enter-back .slide {
+  animation: slide-in-back 0.4s var(--ease) both;
 }
 
 @keyframes slide-in {
   from {
     opacity: 0;
-    transform: translateY(2.2cqh);
+    transform: translateX(2.6cqw);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes slide-in-back {
+  from {
+    opacity: 0;
+    transform: translateX(-2.6cqw);
   }
   to {
     opacity: 1;
@@ -323,6 +340,7 @@ body {
   font-weight: var(--heading-weight, 700);
   line-height: 1.25;
   letter-spacing: 0.01em;
+  text-wrap: balance;
 }
 
 .slide h1 {
@@ -364,7 +382,9 @@ body {
 .slide p,
 .slide ul,
 .slide ol {
-  max-width: 40ch;
+  /* ch は半角基準。日本語は全角なので 48ch ≒ 全角24字で読みやすい行長になる。 */
+  max-width: 48ch;
+  text-wrap: pretty;
 }
 
 .slide ul,
@@ -538,6 +558,605 @@ body {
   height: 100%;
 }
 
+/* ── 追加レイアウト ───────────────────────────────────────── */
+
+/* グリッド: 等間隔のカードで要点・特徴・ロゴを一望。--cells で列数を最適化。 */
+.layout-grid {
+  justify-content: center;
+}
+.layout-grid .slide-body {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  height: 100%;
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16cqw, 1fr));
+  gap: 3.4cqh 3.2cqw;
+  width: 100%;
+  align-content: center;
+}
+.grid[style*='--cells:1'] {
+  grid-template-columns: minmax(0, 46cqw);
+  justify-content: center;
+}
+.grid[style*='--cells:2'] {
+  grid-template-columns: repeat(2, 1fr);
+}
+.grid[style*='--cells:3'] {
+  grid-template-columns: repeat(3, 1fr);
+}
+.grid[style*='--cells:4'] {
+  grid-template-columns: repeat(2, 1fr);
+}
+.layout-grid.cols-2 .grid {
+  grid-template-columns: repeat(2, 1fr);
+}
+.layout-grid.cols-3 .grid {
+  grid-template-columns: repeat(3, 1fr);
+}
+.layout-grid.cols-4 .grid {
+  grid-template-columns: repeat(4, 1fr);
+}
+.grid-cell {
+  min-width: 0;
+  padding: 3cqh 2.6cqw;
+  border-radius: 1.6cqh;
+  background: color-mix(in srgb, var(--fg) 3.5%, transparent);
+  box-shadow: inset 0 0 0 1px var(--rule);
+}
+.grid-cell > :first-child {
+  margin-top: 0;
+}
+.grid-cell > * + * {
+  margin-top: 0.55em;
+}
+.grid-cell :is(h2, h3, h4) {
+  color: var(--accent);
+  margin-bottom: 0.25em;
+}
+.grid-cell :is(p, ul, ol) {
+  max-width: none;
+}
+.grid-cell img {
+  display: block;
+  margin-inline: auto;
+  max-height: 18cqh;
+  width: auto;
+}
+.layout-grid.tight .grid {
+  gap: 2.2cqh 2cqw;
+}
+.layout-grid.tight .grid-cell {
+  padding: 2cqh 1.8cqw;
+}
+
+/* カード: === 区切りの各節を1枚のカードに。先頭の見出し/本文は導入帯。 */
+.layout-cards {
+  justify-content: center;
+}
+.layout-cards .slide-body {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  height: 100%;
+}
+.layout-cards .slide-body > * + * {
+  margin-top: 0;
+}
+.cards-deck {
+  display: flex;
+  flex-direction: column;
+  gap: 4cqh;
+  width: 100%;
+}
+.cards-lead {
+  max-width: 46ch;
+  margin-inline: auto;
+  text-align: center;
+}
+.cards-lead > * + * {
+  margin-top: 0.5em;
+}
+.cards-lead :is(p, ul, ol) {
+  color: var(--muted, var(--fg));
+}
+.cards-row {
+  display: grid;
+  grid-template-columns: repeat(var(--card-count, 3), minmax(0, 1fr));
+  gap: 3.2cqw;
+  align-items: stretch;
+}
+.cards-row:has(.card:nth-child(5)) {
+  grid-template-columns: repeat(auto-fit, minmax(30cqw, 1fr));
+}
+.card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 3.4cqh 2.6cqw;
+  background: var(--surface, var(--bg));
+  border: 1px solid var(--rule);
+  border-top: 0.5cqh solid var(--accent);
+  border-radius: 1.6cqh;
+}
+.card > * + * {
+  margin-top: 0.55em;
+}
+.card > :is(h1, h2, h3, h4, h5, h6):first-child {
+  margin: 0 0 0.15em;
+  font-size: 1.15em;
+  line-height: 1.3;
+  color: var(--accent);
+  letter-spacing: 0.01em;
+  text-transform: none;
+}
+.card :is(p, ul, ol, blockquote) {
+  max-width: none;
+  color: var(--muted, var(--fg));
+  font-size: 0.94em;
+}
+.card strong {
+  color: var(--fg);
+}
+.card :is(pre, img, table) {
+  width: 100%;
+  max-width: 100%;
+}
+.layout-cards.numbered .cards-row {
+  counter-reset: card;
+}
+.layout-cards.numbered .card::before {
+  counter-increment: card;
+  content: counter(card, decimal-leading-zero);
+  font-family: var(--mono);
+  font-size: 0.8em;
+  letter-spacing: 0.12em;
+  color: color-mix(in srgb, var(--accent) 70%, var(--muted));
+  margin-bottom: 0.2em;
+}
+.stage.enter .card {
+  animation: card-rise 0.42s var(--ease) both;
+  animation-delay: calc(var(--card-i, 0) * 60ms);
+}
+@keyframes card-rise {
+  from {
+    opacity: 0;
+    transform: translateY(1.4cqh);
+  }
+}
+
+/* 章扉(セクション): 大きなタイトル + 小ラベル + 罫。 */
+.layout-section {
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+}
+.layout-section .slide-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+.section {
+  max-width: 84cqw;
+}
+.section-kicker {
+  font-family: var(--body-font);
+  font-size: 2.6cqh;
+  font-weight: 600;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--muted, var(--accent));
+}
+.section-kicker > * {
+  margin: 0;
+}
+.section-title > * {
+  margin: 0;
+  text-wrap: balance;
+}
+.section-title :is(h1, h2, h3) {
+  line-height: 1.15;
+}
+.section-title h1 {
+  font-size: 6cqh;
+}
+.section-rule {
+  width: min(18cqw, 12ch);
+  min-width: 56px;
+  height: 0;
+  margin: 3.4cqh auto;
+  border: none;
+  border-top: 0.3cqh solid var(--accent);
+}
+.section-lede {
+  font-size: 3cqh;
+  color: var(--muted, var(--fg));
+  max-width: 60ch;
+  margin-inline: auto;
+}
+.section-lede > * {
+  margin: 0;
+}
+
+/* 数値強調(スタッツ): 大きな数値とキャプションのグリッド。 */
+.layout-stats {
+  justify-content: center;
+}
+.layout-stats .slide-body {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4cqh;
+  height: 100%;
+}
+.layout-stats .slide-body > * + * {
+  margin-top: 0;
+}
+.stats-lead {
+  text-align: center;
+  max-width: 52ch;
+  margin-inline: auto;
+}
+.stats-lead > * + * {
+  margin-top: 0.4em;
+}
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(var(--stat-cols, 3), minmax(0, 1fr));
+  gap: 3cqh 3cqw;
+}
+.stats-grid[data-n='1'] {
+  --stat-cols: 1;
+  max-width: 50cqw;
+  margin-inline: auto;
+}
+.stats-grid[data-n='2'] {
+  --stat-cols: 2;
+}
+.stats-grid[data-n='4'] {
+  --stat-cols: 2;
+}
+.stat {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4cqh;
+  text-align: center;
+  align-items: center;
+}
+.stat-kicker {
+  font-size: 2.2cqh;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted, var(--accent));
+  margin: 0;
+}
+.stat-figure {
+  font-family: var(--heading-font);
+  font-weight: var(--heading-weight, 700);
+  font-size: 11cqh;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+  margin: 0;
+  word-break: keep-all;
+}
+.stat-unit {
+  font-size: 0.5em;
+  color: var(--accent);
+  margin-left: 0.1em;
+}
+.stat-label {
+  font-size: 2.5cqh;
+  line-height: 1.5;
+  color: var(--muted, var(--fg));
+  max-width: 30ch;
+}
+.stat-label > * {
+  margin: 0;
+  max-width: none;
+}
+
+/* 年表(タイムライン): 縦のレールにイベントを並べる。 */
+.layout-timeline {
+  justify-content: center;
+}
+.layout-timeline .slide-body {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.layout-timeline .slide-body > :is(h1, h2) {
+  margin-bottom: 0.6em;
+}
+.timeline-track {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2.4cqh;
+}
+.tl-event {
+  position: relative;
+  padding-left: 5cqw;
+}
+.tl-event::before {
+  content: '';
+  position: absolute;
+  left: 1.1cqw;
+  top: 1.8cqh;
+  bottom: -2.4cqh;
+  width: 0.2cqh;
+  background: var(--rule);
+}
+.tl-event:last-child::before {
+  display: none;
+}
+.tl-node {
+  position: absolute;
+  left: 0.1cqw;
+  top: 0.7cqh;
+  width: 2cqw;
+  height: 2cqw;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 0.5cqw color-mix(in srgb, var(--accent) 20%, transparent);
+}
+.tl-head {
+  display: flex;
+  align-items: baseline;
+  gap: 1.5cqw;
+}
+.tl-time {
+  font-family: var(--mono);
+  font-size: 2.6cqh;
+  font-weight: 600;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+  flex: none;
+}
+/* .slide h3 を上回る詳細度で、設計どおりの大きさ・余白にする。 */
+.layout-timeline .tl-label {
+  font-size: 3cqh;
+  margin: 0;
+}
+.tl-body {
+  margin-top: 0.5cqh;
+  color: var(--muted, var(--fg));
+  font-size: 0.92em;
+}
+.tl-body > * {
+  max-width: none;
+}
+.tl-body > * + * {
+  margin-top: 0.4em;
+}
+
+/* 引用(大判プルクオート): 装飾の引用符は ::before。本文には含めない。 */
+.layout-quote {
+  justify-content: center;
+  align-items: center;
+  padding: 9cqh 12cqw;
+}
+.layout-quote .slide-body {
+  display: flex;
+  justify-content: center;
+  text-align: center;
+}
+.quote-block {
+  position: relative;
+  max-width: 44ch;
+  margin: 0;
+  padding-top: 7cqh;
+}
+.quote-block::before {
+  content: '\201C';
+  position: absolute;
+  top: -3cqh;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--heading-font, Georgia, serif);
+  font-size: 22cqh;
+  line-height: 1;
+  color: var(--accent);
+  opacity: 0.22;
+  pointer-events: none;
+}
+/* .slide blockquote(罫線・muted色)を上回る詳細度で打ち消す。 */
+.layout-quote .quote-text {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  color: var(--fg);
+  font-family: var(--heading-font);
+  font-weight: var(--heading-weight, 600);
+  font-size: 6.2cqh;
+  line-height: 1.45;
+  text-wrap: balance;
+}
+.quote-text > * {
+  max-width: none;
+  margin: 0;
+}
+.quote-text > * + * {
+  margin-top: 0.4em;
+}
+.quote-text strong {
+  color: var(--accent);
+}
+.quote-by {
+  display: block;
+  margin-top: 4.5cqh;
+  padding-top: 3cqh;
+  border-top: 1px solid var(--rule);
+  font-family: var(--body-font);
+  font-weight: 500;
+  font-size: 3cqh;
+  letter-spacing: 0.04em;
+  color: var(--muted, var(--fg));
+}
+.quote-by::before {
+  content: '\2014\00A0';
+  color: var(--accent);
+}
+
+/* 対比(コンペア): 2パネルと中央の vs。 */
+.layout-compare .slide-body {
+  height: 100%;
+}
+.cmp {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: stretch;
+  height: 100%;
+  width: 100%;
+}
+.cmp-side {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 1cqh 3.2cqw;
+  overflow: hidden;
+}
+.cmp-a {
+  padding-left: 0;
+}
+.cmp-b {
+  padding-right: 0;
+}
+.cmp-side > * + * {
+  margin-top: 0.7em;
+}
+.cmp-side :is(p, ul, ol) {
+  max-width: none;
+}
+.cmp-side > :is(h2, h3, h4):first-child {
+  margin-bottom: 0.5em;
+  padding-bottom: 0.3em;
+  border-bottom: 0.2cqh solid var(--rule);
+  color: var(--accent);
+}
+.cmp-divider {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 5.2cqw;
+}
+.cmp-divider::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 0.18cqh;
+  transform: translateX(-50%);
+  background: var(--rule);
+}
+.cmp-vs {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 5cqh;
+  height: 5cqh;
+  padding: 0 1cqh;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  /* accent on accent-soft は一部テーマでAAを割るため、本文色(--fg)にする(全テーマでAA)。 */
+  color: var(--fg);
+  border: 0.18cqh solid color-mix(in srgb, var(--accent) 40%, var(--rule));
+  font-family: var(--heading-font);
+  font-weight: var(--heading-weight, 700);
+  font-size: 2cqh;
+  letter-spacing: 0.04em;
+}
+.layout-compare.cmp-arrow .cmp-vs {
+  font-size: 2.6cqh;
+}
+.layout-compare.cmp-arrow .cmp-vs::after {
+  content: '\2192';
+}
+
+/* 画像分割(左/右): 片側に画像(裁ち落とし)、もう片側に本文を縦中央。 */
+.layout-image-left,
+.layout-image-right {
+  padding: 0;
+}
+.layout-image-left .slide-body,
+.layout-image-right .slide-body {
+  height: 100%;
+}
+.media-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  height: 100%;
+  width: 100%;
+}
+.media-fig {
+  margin: 0;
+  background-color: var(--accent-soft);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+.media-left .media-fig {
+  border-right: 1px solid var(--rule);
+}
+.media-right .media-fig {
+  border-left: 1px solid var(--rule);
+}
+.media-fig.empty {
+  background-image: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--accent-soft) 70%, var(--bg)),
+    var(--accent-soft)
+  );
+}
+.media-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 7cqh 7cqw;
+  overflow: hidden;
+}
+.media-body > * + * {
+  margin-top: 0.7em;
+}
+.media-body :is(p, ul, ol, blockquote) {
+  max-width: 30ch;
+}
+.media-body h1 {
+  font-size: 1.9em;
+}
+.media-body h2 {
+  font-size: 1.35em;
+}
+
+/* 背景画像つきスライドでは、対比・引用の罫/文字を白側へ寄せて可読に。 */
+.slide.on-image .cmp-vs {
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.5);
+}
+.slide.on-image .quote-text,
+.slide.on-image .quote-by {
+  color: #fff;
+}
+.slide.on-image .quote-block::before {
+  color: #fff;
+  opacity: 0.3;
+}
+
 /* スライドを直接編集(PowerPoint風の自由配置 + view ⇄ md 双方向)。 */
 
 /* 編集モードでは、ブロックはクリックで選択・ドラッグで移動できる。 */
@@ -591,6 +1210,21 @@ body {
 .deck-root.live .ov-shape {
   pointer-events: auto;
   cursor: move;
+}
+
+/* 自由配置の画像。箱いっぱいに cover で敷く。内側の img はドラッグを奪わない。 */
+.ov-shape-image {
+  overflow: hidden;
+  border-radius: 4px;
+}
+.ov-shape-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  pointer-events: none;
+  -webkit-user-drag: none;
+  user-select: none;
 }
 
 /* 選択枠と8方向のハンドル。 */
@@ -735,6 +1369,42 @@ body {
   transition:
     opacity 0.3s var(--ease),
     transform 0.3s var(--ease);
+}
+
+/* いま現れたブロックは静かに立ち上げる。 */
+.frag-current {
+  animation: frag-rise 0.42s var(--ease) both;
+}
+@keyframes frag-rise {
+  from {
+    opacity: 0;
+    transform: translateY(1.2cqh);
+  }
+}
+
+/* key-first: 通過済みのブロックは静かに退いて、現在地に視線を集める。 */
+.frag-past {
+  opacity: 0.4;
+  transition: opacity 0.3s var(--ease);
+}
+
+/* キーメッセージは見出しの下にアクセントの罫を添えて「ここが要点」を示す。 */
+.slide [data-key] {
+  position: relative;
+}
+.slide [data-key]::after {
+  content: '';
+  display: block;
+  width: 2.2em;
+  height: 0.16em;
+  margin: 0.4em 0 0;
+  background: var(--accent);
+  border-radius: 2px;
+}
+.layout-center [data-key]::after,
+.layout-title [data-key]::after,
+.layout-section [data-key]::after {
+  margin-inline: auto;
 }
 
 /* ── ナビ・フッター ── */
@@ -1143,6 +1813,17 @@ body {
   color: var(--ui-accent);
 }
 
+/* 画像の「インライン/自由配置」選択メニュー。スライド中央に浮かべる。 */
+.img-chooser {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  right: auto; /* .menu の right:16px を打ち消し、中央に正しく置く */
+  transform: translate(-50%, -50%);
+  width: max-content;
+  z-index: 12;
+}
+
 /* ── 進捗オーバーレイ ── */
 
 .busy {
@@ -1372,5 +2053,93 @@ body {
   }
   .frag-hidden {
     transform: none;
+  }
+}
+
+/* ── ユーティリティ・追補 ── */
+
+/* スクリーンリーダー専用(視覚的に隠すが読み上げは残す)。 */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* キーボードでナビ矢印にフォーカスしたら見えるように。 */
+.nav:focus-visible {
+  opacity: 1;
+}
+
+/* ヘルプ: 縦に長い時はスクロールし、ボタンは横並びに。 */
+.help-card {
+  max-height: 88vh;
+  overflow: auto;
+}
+.help-card .kicker {
+  margin-top: 16px;
+}
+.help-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 18px;
+}
+.help-actions .mini {
+  margin-top: 0;
+}
+
+/* 擬似全画面(requestFullscreen の無い環境)。16:9 を保って黒地に中央寄せ。 */
+body.faux-full {
+  background: #000;
+}
+body.faux-full .bar,
+body.faux-full .editor,
+body.faux-full .panel {
+  display: none;
+}
+body.faux-full .deck-root {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  z-index: 80;
+  width: 100vw;
+  max-width: calc(100dvh * 16 / 9);
+  border-radius: 0;
+}
+
+/* 中サイズではデッキ高さに dvh を使い、モバイルのツールバー出没でも崩れにくく。 */
+@supports (height: 100dvh) {
+  .deck-root {
+    max-width: calc((100dvh - 200px) * 16 / 9);
+  }
+}
+
+/* 狭い画面: タイトルを隠し、ツールバーは折り返して全ボタンを残す。 */
+@media (max-width: 560px) {
+  .bar {
+    flex-wrap: wrap;
+    row-gap: 2px;
+  }
+  .bar-title {
+    display: none;
+  }
+  .viewer {
+    padding: 12px;
+  }
+}
+
+/* タッチ端末: ハンドルを大きく、ナビ矢印を常時うっすら見せる。 */
+@media (pointer: coarse) {
+  .sel-h {
+    width: 14px;
+    height: 14px;
+  }
+  .nav {
+    opacity: 0.5;
   }
 }

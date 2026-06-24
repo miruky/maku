@@ -1,6 +1,7 @@
-// 100種類のテーマ。色25系統 × 昼/夜 × 明朝/ゴシック = 100。
+// 264種類のテーマ。色44系統 × 昼/夜 × 明朝/ゴシック/丸ゴシック = 264。
 // 各テーマはCSSカスタムプロパティの束で、スライドの土台に流し込む。
 // HSLで体系的に作るので、どれも彩度・明度がそろい、シンプルで統一感がある。
+// 色名は日本の伝統色から採り、色相環をすき間なく覆うよう選んでいる。
 
 export interface Theme {
   id: string;
@@ -42,6 +43,26 @@ const FAMILIES: Family[] = [
   { id: 'mori', name: '杜', hue: 140, sat: 36 },
   { id: 'fuji', name: '藤', hue: 260, sat: 34 },
   { id: 'haizakura', name: '灰桜', hue: 350, sat: 16 },
+  // ── 色相環のすき間を埋める追加の伝統色(19系統)──
+  { id: 'enji', name: '臙脂', hue: 359, sat: 34 },
+  { id: 'shu', name: '朱', hue: 8, sat: 42 },
+  { id: 'shishi', name: '宍', hue: 17, sat: 25 },
+  { id: 'kincha', name: '金茶', hue: 37, sat: 52 },
+  { id: 'kihada', name: '黄蘗', hue: 56, sat: 46 },
+  { id: 'uguisu', name: '鶯', hue: 67, sat: 34 },
+  { id: 'midori', name: '緑', hue: 124, sat: 44 },
+  { id: 'matsuba', name: '松葉', hue: 129, sat: 30 },
+  { id: 'rokushou', name: '緑青', hue: 177, sat: 32 },
+  { id: 'asagi', name: '浅葱', hue: 186, sat: 50 },
+  { id: 'rurikon', name: '瑠璃紺', hue: 242, sat: 52 },
+  { id: 'kachi', name: '褐', hue: 237, sat: 30 },
+  { id: 'ayame', name: '菖蒲', hue: 280, sat: 40 },
+  { id: 'shikon', name: '紫紺', hue: 317, sat: 48 },
+  { id: 'botan', name: '牡丹', hue: 327, sat: 46 },
+  { id: 'tsutsuji', name: '躑躅', hue: 336, sat: 44 },
+  { id: 'nadeshiko', name: '撫子', hue: 343, sat: 26 },
+  { id: 'umenezumi', name: '梅鼠', hue: 323, sat: 9 },
+  { id: 'hatobanezumi', name: '鳩羽鼠', hue: 255, sat: 10 },
 ];
 
 const FONTS = {
@@ -56,6 +77,13 @@ const FONTS = {
     heading: "'Hiragino Sans', 'Noto Sans JP', system-ui, sans-serif",
     body: "'Hiragino Sans', 'Noto Sans JP', system-ui, sans-serif",
     weight: '800',
+  },
+  maru: {
+    label: '丸ゴ',
+    heading:
+      "'Hiragino Maru Gothic ProN', 'Hiragino Maru Gothic Pro', 'Zen Maru Gothic', 'M PLUS Rounded 1c', 'Quicksand', system-ui, sans-serif",
+    body: "'Hiragino Maru Gothic ProN', 'Hiragino Sans', 'Noto Sans JP', system-ui, sans-serif",
+    weight: '700',
   },
 } as const;
 
@@ -136,7 +164,7 @@ function buildThemes(): Theme[] {
   const out: Theme[] = [];
   for (const f of FAMILIES) {
     for (const mode of ['light', 'dark'] as const) {
-      for (const fontKey of ['mincho', 'gothic'] as const) {
+      for (const fontKey of ['mincho', 'gothic', 'maru'] as const) {
         const font = FONTS[fontKey];
         const base = mode === 'dark' ? darkVars(f) : lightVars(f);
         out.push({
