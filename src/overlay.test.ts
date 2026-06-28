@@ -77,14 +77,15 @@ describe('shapeInnerSvg / shapeLabel / 判定', () => {
 });
 
 describe('ensureSlide / slideOverlay', () => {
-  it('無ければ空の構造を返す', () => {
-    expect(slideOverlay({}, 0)).toEqual({ shapes: [] });
+  it('無ければ空の構造を返す(空キーも安全)', () => {
+    expect(slideOverlay({}, 'sX')).toEqual({ shapes: [] });
+    expect(slideOverlay({}, '')).toEqual({ shapes: [] });
   });
-  it('ensureSlide は実体を作って返す', () => {
+  it('ensureSlide は実体を作って返す(スライドIDキー)', () => {
     const o: Overlay = {};
-    const s = ensureSlide(o, 2);
+    const s = ensureSlide(o, 'sA1');
     s.shapes.push({ id: 'x', kind: 'rect', x: 1, y: 1, w: 1, h: 1 });
-    expect(o[2]!.shapes).toHaveLength(1);
+    expect(o['sA1']!.shapes).toHaveLength(1);
   });
 });
 

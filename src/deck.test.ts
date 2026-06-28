@@ -21,6 +21,17 @@ describe('parseDeck', () => {
     expect(deck.slides).toHaveLength(2);
   });
 
+  it('<!-- id: xxx --> をスライドの安定IDに取り込む', () => {
+    expect(parseDeck('<!-- id: abc123 -->\n# A').slides[0]!.id).toBe('abc123');
+    expect(parseDeck('# A').slides[0]!.id).toBeUndefined();
+  });
+
+  it('64字超・不正な文字の id は無視する(overlay保存側の検証と対称)', () => {
+    expect(parseDeck(`<!-- id: ${'a'.repeat(70)} -->\n# A`).slides[0]!.id).toBeUndefined();
+    expect(parseDeck('<!-- id: bad id! -->\n# A').slides[0]!.id).toBeUndefined();
+    expect(parseDeck('<!-- id: ok-1_2 -->\n# A').slides[0]!.id).toBe('ok-1_2');
+  });
+
   it('レイアウト指示(center / title / full)', () => {
     expect(parseDeck('<!-- center -->\n# x').slides[0]!.layout).toBe('center');
     expect(parseDeck('<!-- layout: title -->\n# x').slides[0]!.layout).toBe('title');

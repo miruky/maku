@@ -45,7 +45,7 @@ export interface SlideOverlay {
   shapes: Shape[];
 }
 
-export type Overlay = Record<number, SlideOverlay>; // スライドindex → オーバーレイ
+export type Overlay = Record<string, SlideOverlay>; // スライドの安定ID(<!-- id: xxx -->)→ オーバーレイ。旧データは index 文字列キー
 
 const KEY = 'maku.overlay2'; // 旧 index ベースのデータと混ざらないよう鍵を変える
 
@@ -60,8 +60,8 @@ export function sanitizeOverlay(input: unknown): Overlay {
   if (!input || typeof input !== 'object') return {};
   const out: Overlay = {};
   for (const [k, v] of Object.entries(input as Record<string, unknown>)) {
-    const i = Number(k);
-    if (!Number.isInteger(i) || i < 0 || !v || typeof v !== 'object') continue;
+    // キーはスライドの安定ID(または旧 index 文字列)。空・極端に長いキーや非オブジェクトは捨てる。
+    if (!k || k.length > 64 || !v || typeof v !== 'object') continue;
     const slide = v as { shapes?: unknown };
     const shapes: Shape[] = [];
     if (Array.isArray(slide.shapes)) {
@@ -92,7 +92,7 @@ export function sanitizeOverlay(input: unknown): Overlay {
         }
       }
     }
-    out[i] = { shapes };
+    if (shapes.length) out[k] = { shapes }; // 空(全削除済み)のスライドはキーごと落として整理する
   }
   return out;
 }
@@ -116,14 +116,14 @@ export function saveOverlay(o: Overlay): boolean {
   }
 }
 
-export function slideOverlay(o: Overlay, slide: number): SlideOverlay {
-  const s = o[slide];
+export function slideOverlay(o: Overlay, slide: string): SlideOverlay {
+  const s = slide ? o[slide] : undefined;
   return s ? { shapes: s.shapes ?? [] } : { shapes: [] };
 }
 
-export function ensureSlide(o: Overlay, slide: number): SlideOverlay {
+export function ensureSlide(o: Overlay, slide: string): SlideOverlay {
   if (!o[slide]) o[slide] = { shapes: [] };
-  const s = o[slide];
+  const s = o[slide]!;
   if (!s.shapes) s.shapes = [];
   return s;
 }
