@@ -476,6 +476,14 @@ const stage = $('stage');
 const mdInput = $<HTMLTextAreaElement>('md');
 const barTitle = $('bar-title');
 
+// 一覧・発表者ノート・各オーバーレイを deck-root の配下へ移す。これらは position:fixed のため
+// 通常表示では変わらず画面全体に出るが、全画面(requestFullscreen(deck-root))のときも
+// フルスクリーンのサブツリーに含まれるので、発表中に O(一覧)・S(ノート)・?(ヘルプ)が見える。
+for (const id of ['overview-overlay', 'notes-panel', 'theme-modal', 'help-overlay', 'gslides-modal']) {
+  const el = document.getElementById(id);
+  if (el) deckRoot.appendChild(el);
+}
+
 // ツールバーはアイコンのみなので、ホバー/フォーカスで役割を示すツールチップを出す。
 // 端のボタンでも見切れないよう、JSで左右をビューポート内にクランプして配置する。
 const tip = document.createElement('div');
