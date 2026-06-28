@@ -1727,6 +1727,48 @@ body {
   color: var(--ui-soft);
 }
 
+/* 発表者ノート: 現スライドのステップ進捗(段階表示が無いスライドでは行ごと隠す) */
+.step-now {
+  padding: 6px 14px 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ui-accent);
+  font-variant-numeric: tabular-nums;
+}
+.step-now:empty {
+  display: none;
+}
+
+/* 発表者ノート: 次スライドのプレビュー(下端に固定表示) */
+.notes-next {
+  flex: none;
+  padding: 8px 14px 12px;
+  border-top: 1px solid var(--ui-line);
+}
+.np-label {
+  font-size: 11px;
+  color: var(--ui-soft);
+  margin-bottom: 6px;
+}
+.np-end {
+  font-style: italic;
+}
+.np-thumb {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border: 1px solid var(--ui-line);
+  border-radius: 6px;
+  overflow: hidden;
+  position: relative;
+  container-type: size;
+  background: var(--bg, #fff);
+  color: var(--fg, #111);
+}
+.np-thumb .slide {
+  width: 100%;
+  height: 100%;
+}
+
 /* ── オーバーレイ共通 ── */
 
 .overlay {

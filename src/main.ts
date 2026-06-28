@@ -228,7 +228,9 @@ app.innerHTML = `
       <button class="mini" id="timer-toggle">開始</button>
       <button class="mini" id="timer-reset">0</button>
     </div>
+    <div class="step-now" id="notes-step"></div>
     <div class="notes-body" id="notes-body"></div>
+    <div class="notes-next" id="notes-next"></div>
   </div>
 
   <div class="overlay" id="overview-overlay" hidden>
@@ -386,7 +388,7 @@ theme: ai-hiru-mincho
             <dt>Home / End</dt><dd>最初 / 最後</dd>
             <dt>F</dt><dd>全画面で発表</dd>
             <dt>O</dt><dd>スライド一覧</dd>
-            <dt>S</dt><dd>発表者ノート・タイマー</dd>
+            <dt>S</dt><dd>発表者ノート(次スライドのプレビュー・ステップ進捗・タイマーつき)</dd>
             <dt>E</dt><dd>Markdown エディタ</dd>
             <dt>T</dt><dd>テーマ選択</dd>
             <dt>P</dt><dd>書き出し</dd>
@@ -535,7 +537,7 @@ window.addEventListener('scroll', hideTip, true);
 window.addEventListener('resize', hideTip);
 
 const presenter = new Presenter(
-  { stage, progress: $('progress'), counter: $('counter'), notes: $('notes-body') },
+  { stage, progress: $('progress'), counter: $('counter'), notes: $('notes-body'), next: $('notes-next'), step: $('notes-step') },
   (i) => {
     if (location.hash !== `#${i + 1}`) history.replaceState(null, '', urlFor(i + 1));
     const lr = document.getElementById('live-region');
