@@ -1,12 +1,14 @@
 import type { Deck, Slide } from './deck';
 import { renderMarkdown } from './markdown';
-import { slideHtmlMapped } from './render';
+import { slideHtml, slideHtmlMapped } from './render';
 
 export interface PresenterEls {
   stage: HTMLElement;
   progress: HTMLElement;
   counter: HTMLElement;
   notes: HTMLElement;
+  next?: HTMLElement; // 発表者ノートの「次スライド」プレビュー(任意)
+  step?: HTMLElement; // 発表者ノートの「ステップ k / N」表示(任意)
 }
 
 // スライドの表示・移動・段階表示・ノート・進捗を司る。描画はstageの差し替え。
@@ -124,6 +126,22 @@ export class Presenter {
       el.classList.toggle('frag-hidden', active && s > this.step);
       el.classList.toggle('frag-current', active && s > 0 && s === this.step);
       el.classList.toggle('frag-past', active && keyFirst && s > 0 && s < this.step);
+    }
+    this.updateAux();
+  }
+
+  // 発表者ノートの補助表示(次スライドのプレビュー / 現スライドのステップ進捗)を更新する。
+  private updateAux(): void {
+    if (this.els.step) {
+      const mx = this.maxStep();
+      // このスライドでまだ段階が残るときだけ「ステップ k / N」を出す。
+      this.els.step.textContent = mx > 1 ? `ステップ ${Math.min(this.step, mx)} / ${mx}` : '';
+    }
+    if (this.els.next) {
+      const nx = this.deck.slides[this.idx + 1];
+      this.els.next.innerHTML = nx
+        ? `<div class="np-label">次のスライド (${this.idx + 2} / ${this.total})</div><div class="np-thumb">${slideHtml(nx)}</div>`
+        : '<div class="np-label np-end">これが最後のスライドです</div>';
     }
   }
 
