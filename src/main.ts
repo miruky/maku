@@ -878,7 +878,7 @@ function deleteMultiBlocks(): void {
 
 // 図形の重なり順(配列順=描画順)を変える。
 function reorderShape(id: string, where: 'front' | 'back' | 'up' | 'down'): void {
-  const arr = overlay[presenter.index]?.shapes;
+  const arr = overlay[curId()]?.shapes;
   if (!arr) return;
   const i = arr.findIndex((s) => s.id === id);
   if (i < 0) return;
@@ -890,7 +890,7 @@ function reorderShape(id: string, where: 'front' | 'back' | 'up' | 'down'): void
   decorateStage();
 }
 function duplicateShape(id: string): void {
-  const arr = overlay[presenter.index]?.shapes;
+  const arr = overlay[curId()]?.shapes;
   const sh = arr?.find((s) => s.id === id);
   if (!arr || !sh) return;
   const copy = { ...sh, id: newId(), x: Math.min(97, sh.x + 3), y: Math.min(97, sh.y + 3) } as Shape;
@@ -1092,8 +1092,28 @@ function slideEl(): HTMLElement | null {
   return stage.querySelector<HTMLElement>('.slide');
 }
 
+// 現在スライドの overlay キー(安定ID)。無指定なら ''(= overlay 無し扱い)。
+function curId(): string {
+  return presenter.current()?.id ?? '';
+}
+// 現在スライドに安定IDが無ければ生成して <!-- id: xxx --> を本文先頭に書き、再描画して返す。
+// 図形を追加するときに呼ぶ(スライドを並べ替え/削除しても図形が追従するようにする)。
+function ensureCurrentSlideId(): string {
+  const cur = presenter.current();
+  if (!cur) return '';
+  if (cur.id) return cur.id;
+  const id = newId();
+  if (mdInput.value.includes('\r')) mdInput.value = mdInput.value.replace(/\r\n?/g, '\n');
+  const fresh = parseDeck(mdInput.value).slides[presenter.index];
+  if (!fresh) return '';
+  mdInput.value = mdInput.value.slice(0, fresh.srcStart) + `<!-- id: ${id} -->\n` + mdInput.value.slice(fresh.srcStart);
+  persistMd();
+  rebuild(true);
+  return id;
+}
+
 function findShape(id: string): Shape | undefined {
-  return overlay[presenter.index]?.shapes.find((s) => s.id === id);
+  return overlay[curId()]?.shapes.find((s) => s.id === id);
 }
 
 // 選択中の図形の現在の箱(%)。図形がなければ無難な既定値。
@@ -1111,7 +1131,7 @@ function clearSnapGuides(): void {
 function snapTargets(dragId: string): { xs: number[]; ys: number[] } {
   const xs = [0, 50, 100];
   const ys = [0, 50, 100];
-  for (const s of overlay[presenter.index]?.shapes ?? []) {
+  for (const s of overlay[curId()]?.shapes ?? []) {
     if (s.id === dragId) continue;
     xs.push(s.x, s.x + s.w / 2, s.x + s.w);
     ys.push(s.y, s.y + s.h / 2, s.y + s.h);
@@ -1625,7 +1645,7 @@ function defaultShapeBox(kind: VectorKind): Box {
 }
 
 function insertShape(kind: VectorKind): void {
-  const o = ensureSlide(overlay, presenter.index);
+  const o = ensureSlide(overlay, ensureCurrentSlideId());
   const shape: Shape = { id: newId(), kind, ...defaultShapeBox(kind) };
   o.shapes.push(shape);
   if (!saveOverlay(overlay)) toast('保存できませんでした(容量超過の可能性)'); // 他の挿入経路と同じく失敗を通知
@@ -1682,10 +1702,11 @@ function imageBox(ar: number, at?: { x: number; y: number }): Box {
 }
 
 function addFreeImage(src: string, alt: string, at?: { x: number; y: number }): void {
-  const idx = presenter.index; // 非同期ロード完了までに移動しても、配置先スライドを固定する
+  const sid = ensureCurrentSlideId(); // 配置先スライドの安定IDを確定(非同期ロード後に移動しても追従)
   const probe = new Image();
   const place = (ar: number): void => {
-    const o = ensureSlide(overlay, idx);
+    if (!sid) return;
+    const o = ensureSlide(overlay, sid);
     const box = imageBox(ar, at);
     const shape: ImageShape = { id: newId(), kind: 'image', src, alt, ar, ...box };
     o.shapes.push(shape);
@@ -1695,7 +1716,7 @@ function addFreeImage(src: string, alt: string, at?: { x: number; y: number }): 
       return;
     }
     // 配置先スライドを今表示しているときだけ再描画して選択する(移動済みなら保存だけ)。
-    if (presenter.index === idx) {
+    if (curId() === sid) {
       decorateStage();
       const el = stage.querySelector<HTMLElement>(`.ov-shape[data-sid="${shape.id}"]`);
       if (el) selectShape(el);
@@ -1730,7 +1751,7 @@ function addInlineImage(dataUrl: string, alt: string): void {
 
 // 自由配置のテキストボックスを追加(overlay。Markdown には書き込まない)。
 function insertTextShape(): void {
-  const o = ensureSlide(overlay, presenter.index);
+  const o = ensureSlide(overlay, ensureCurrentSlideId());
   const shape: Shape = { id: newId(), kind: 'text', text: '', x: 30, y: 42, w: 40, h: 16 };
   o.shapes.push(shape);
   if (!saveOverlay(overlay)) {
@@ -1750,7 +1771,7 @@ function deleteSelection(): void {
   if (!sel) return;
   if (sel.kind === 'shape') {
     const id = sel.id;
-    const o = ensureSlide(overlay, presenter.index);
+    const o = ensureSlide(overlay, curId());
     o.shapes = o.shapes.filter((s) => s.id !== id);
     saveOverlay(overlay);
     deselect();
@@ -1764,6 +1785,12 @@ function deleteSelection(): void {
   let end = e0;
   if (v0[end] === '\n') end += 1;
   if (v0[end] === '\n') end += 1;
+  // 先頭スライドを空にする削除では、直後に残る区切り --- も一緒に消す
+  // (先頭に --- が残ると以降がフロントマターと誤認され、スライドが崩れるため)。
+  if (start === 0) {
+    const m = /^[ \t]*\n*[ \t]*---[ \t]*(\n|$)/.exec(v0.slice(end));
+    if (m) end += m[0].length;
+  }
   mdInput.value = v0.slice(0, start) + v0.slice(end);
   persistMd();
   deselect();
@@ -1807,7 +1834,7 @@ function decorateStage(): void {
   deckRoot.classList.toggle('live', enable);
   insertBar.hidden = !enable;
   const el = slideEl();
-  if (el) applyOverlay(el, slideOverlay(overlay, presenter.index));
+  if (el) applyOverlay(el, slideOverlay(overlay, curId()));
   updateRevealUi(); // 段階表示のバッジ/ツールバー状態を更新
   if (!enable) {
     frame.hidden = true;
@@ -1915,11 +1942,67 @@ setTheme(currentTheme.id, false);
     setTheme(firstDeck.meta.theme, false);
   }
 }
+// 旧データ(スライド index をキーに保存された overlay)を、スライドの安定ID(<!-- id: xxx -->)へ
+// 移す一度きりの移行。図形のあるスライドに id を書き、overlay のキーを index→id へ付け替える。
+function migrateOverlayIds(): void {
+  const numeric = Object.keys(overlay).filter((k) => /^\d+$/.test(k));
+  if (!numeric.length) return;
+  if (mdInput.value.includes('\r')) mdInput.value = mdInput.value.replace(/\r\n?/g, '\n');
+  let deck = parseDeck(mdInput.value);
+  // index 降順で処理(id 前置は後続スライドのオフセットを動かすため、後ろから)。
+  const idxs = numeric.map(Number).filter((i) => deck.slides[i]).sort((a, b) => b - a);
+  for (const i of idxs) {
+    const data = overlay[String(i)];
+    if (!data || !data.shapes.length) {
+      delete overlay[String(i)];
+      continue;
+    }
+    const slide = deck.slides[i]!;
+    let id = slide.id;
+    if (!id) {
+      id = newId();
+      mdInput.value = mdInput.value.slice(0, slide.srcStart) + `<!-- id: ${id} -->\n` + mdInput.value.slice(slide.srcStart);
+      deck = parseDeck(mdInput.value);
+    }
+    overlay[id] = data;
+    delete overlay[String(i)];
+  }
+  // 残った数値キー(対応スライドが消えた孤児データ)は捨てる。
+  for (const k of Object.keys(overlay)) if (/^\d+$/.test(k)) delete overlay[k];
+  persistMd();
+  saveOverlay(overlay);
+}
+
+// 同じ <!-- id --> を持つスライドが複数あると overlay を共有してしまう(スライドのコピペ等)。
+// 最初の1枚はそのまま、以降の重複スライドだけ新しいIDへ振り直す(コピー先は空の overlay になる)。
+// mdInput.value を書き換えるだけで rebuild はしない(呼び出し側が再描画する)。変更があれば true。
+function dedupeSlideIds(): boolean {
+  if (mdInput.value.includes('\r')) mdInput.value = mdInput.value.replace(/\r\n?/g, '\n');
+  const deck = parseDeck(mdInput.value);
+  const seen = new Set<string>();
+  const dups: number[] = [];
+  deck.slides.forEach((s, i) => {
+    if (!s.id) return;
+    if (seen.has(s.id)) dups.push(i);
+    else seen.add(s.id);
+  });
+  if (!dups.length) return false;
+  for (const i of [...dups].sort((a, b) => b - a)) {
+    const s = deck.slides[i]!;
+    const region = mdInput.value.slice(s.srcStart, s.srcEnd).replace(/<!--\s*id:\s*\S+\s*-->/, `<!-- id: ${newId()} -->`);
+    mdInput.value = mdInput.value.slice(0, s.srcStart) + region + mdInput.value.slice(s.srcEnd);
+  }
+  persistMd();
+  return true;
+}
+
 {
   // ディープリンクのスライド番号は rebuild の前に読む。rebuild の初回 render が onChange を
   // 同期発火させ、hash を #1 に書き換えてしまうため(先に読まないと常に1枚目に戻る)。
   // 先頭の数字だけ読む(新形式 #3、旧形式 #3?theme=… のどちらでも復元できる)。
   const start = Number.parseInt(location.hash.slice(1), 10) - 1;
+  migrateOverlayIds(); // 旧 index データを id へ移行してから描画
+  dedupeSlideIds(); // 保存済みデッキ内の重複 id を解消(コピペ由来の overlay 共有を防ぐ)
   rebuild(false);
   if (Number.isFinite(start) && start > 0) presenter.go(start);
 }
@@ -1945,6 +2028,7 @@ function scheduleRebuild(): void {
       scheduleRebuild();
       return;
     }
+    dedupeSlideIds(); // テキスト編集(スライドのコピペ含む)で生じた重複 id を解消してから再描画
     rebuild(true);
   }, 120);
 }
@@ -2122,7 +2206,7 @@ function doPrint(): void {
   host.innerHTML = deck.slides.map((s) => `<div class="print-page">${slideHtml(s)}</div>`).join('');
   // 自由配置(テキスト/図形/画像)も印刷に反映する。
   host.querySelectorAll<HTMLElement>('.print-page > .slide').forEach((el, i) => {
-    applyOverlay(el, slideOverlay(overlay, i));
+    applyOverlay(el, slideOverlay(overlay, deck.slides[i]?.id ?? ''));
   });
   window.print();
 }
@@ -2254,7 +2338,7 @@ function buildOverview(): void {
     cell.style.setProperty('--i', String(i));
     cell.innerHTML = `<div class="ov-thumb">${slideHtml(s)}</div><span class="ov-no">${i + 1}</span>`;
     const thumbSlide = cell.querySelector<HTMLElement>('.ov-thumb > .slide');
-    if (thumbSlide) applyOverlay(thumbSlide, slideOverlay(overlay, i)); // 自由配置(テキスト/図形/画像)も一覧に出す
+    if (thumbSlide) applyOverlay(thumbSlide, slideOverlay(overlay, s.id ?? '')); // 自由配置(テキスト/図形/画像)も一覧に出す
     cell.addEventListener('click', () => {
       nav(() => presenter.go(i));
       toggle('overview-overlay', false);

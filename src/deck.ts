@@ -68,6 +68,9 @@ export interface Slide {
   bodyLines: SourceLine[];
   // split のとき、各段の本文行。
   columnLines: SourceLine[][] | null;
+  // <!-- id: xxx --> で付与する安定ID。自由配置(overlay)の図形をこのIDで紐付け、
+  // スライドを並べ替え/削除しても図形が追従するようにする(無指定なら undefined)。
+  id?: string;
 }
 
 export interface Deck {
@@ -211,6 +214,7 @@ function parseSlide(raw: SourceLine[]): Slide {
   let layout: Layout = 'default';
   let background: string | null = null;
   let reveal: RevealMode = 'none';
+  let slideId: string | undefined;
   const classes: string[] = [];
   const kept: SourceLine[] = [];
   // 単独行マーカー(<!-- key --> など)は、次に来る本文ブロックに紐づける。
@@ -231,6 +235,7 @@ function parseSlide(raw: SourceLine[]): Slide {
         setBackground: (b) => (background = b),
         setReveal: (r) => (reveal = r),
         addClass: (c) => classes.push(c),
+        setId: (v) => (slideId = v),
       });
       continue;
     }
@@ -351,6 +356,7 @@ function parseSlide(raw: SourceLine[]): Slide {
     srcEnd,
     bodyLines,
     columnLines,
+    id: slideId,
   };
 }
 
@@ -506,6 +512,7 @@ interface DirectiveSink {
   setBackground: (b: string) => void;
   setReveal: (r: RevealMode) => void;
   addClass: (c: string) => void;
+  setId: (id: string) => void;
 }
 
 function applyDirective(body: string, sink: DirectiveSink): void {
@@ -515,6 +522,8 @@ function applyDirective(body: string, sink: DirectiveSink): void {
     const value = kv[2]!.trim();
     if (key === 'layout' && (LAYOUTS as string[]).includes(value)) sink.setLayout(value as Layout);
     else if (key === 'class') value.split(/\s+/).forEach((c) => sink.addClass(c));
+    // id は安全な文字・64字以内のみ受理(overlay 保存側の検証と対称に。長すぎ/不正は無視)。
+    else if (key === 'id' && /^[\w-]{1,64}$/.test(value)) sink.setId(value);
     else if (key === 'bg' || key === 'background') sink.setBackground(value);
     else if (key === 'reveal') {
       const v = value.toLowerCase();
