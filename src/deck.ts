@@ -33,7 +33,8 @@ export interface SourceLine {
 }
 
 // 段階表示の方式。sequential は上から順に、key-first はキーメッセージを先に強調表示する。
-export type RevealMode = 'none' | 'sequential' | 'key-first';
+// none=段階表示なし / sequential=上から順 / key-first=要点を先に / manual=番号付きだけ順に出し無印は常時表示
+export type RevealMode = 'none' | 'sequential' | 'key-first' | 'manual';
 
 // 段階表示の各ステップ。step は 1 始まり(0 は常時表示=ピン)、key は強調する見出し。
 export interface SlideStep {
@@ -353,6 +354,85 @@ function parseSlide(raw: SourceLine[]): Slide {
   };
 }
 
+// ブロック直前の段階表示マーカー(key/pin/group/step:N/@N/*/+)1行を表す正規表現。
+const BLOCK_MARKER_RE = /^[ \t]*<!--[ \t]*(?:key|pin|group|\*|\+|step[ \t]*:[ \t]*\d+|@\d+)[ \t]*-->[ \t]*$/i;
+export type BlockMarker = 'auto' | 'key' | 'group' | 'pin' | `step:${number}`;
+
+// マーカー種別を directive 本文へ。'auto' は「マーカー無し」を表す。
+function markerDirective(marker: BlockMarker): string | null {
+  if (marker === 'auto') return null;
+  if (marker === 'key' || marker === 'group' || marker === 'pin') return `<!-- ${marker} -->`;
+  const m = /^step:(\d+)$/.exec(marker);
+  if (m) return `<!-- step: ${m[1]} -->`;
+  return null;
+}
+
+// 指定ブロック(絶対オフセット blockStart の行)の直前にあるマーカー行を置き換える/取り除く。
+// parseSlide はマーカーを「次の非空行」へ付与するため、空行を挟んだマーカーや複数行のマーカーも
+// 対象にする(直前の連続する「空行＋マーカー行」を遡り、マーカー行だけ除去して新しいものを置く)。
+// 'auto' は既存マーカーを外すだけ。GUI でブロックの段階表示の役割/順番を設定する純粋関数。
+export function setBlockMarker(source: string, blockStart: number, marker: BlockMarker): string {
+  const lines = source.split('\n');
+  // blockStart が何行目か(行頭オフセットの一致で判定)。
+  let acc = 0;
+  let blockLine = lines.length - 1;
+  for (let i = 0; i < lines.length; i += 1) {
+    const next = acc + lines[i]!.length + 1;
+    if (blockStart < next) {
+      blockLine = i;
+      break;
+    }
+    acc = next;
+  }
+  // ブロック行の直前から、空行とマーカー行が続く範囲を遡る。マーカー行は捨て、空行は保つ。
+  const keptBlanks: string[] = [];
+  let runStart = blockLine;
+  for (let j = blockLine - 1; j >= 0; j -= 1) {
+    const line = lines[j]!;
+    if (BLOCK_MARKER_RE.test(line)) {
+      runStart = j;
+    } else if (line.trim() === '') {
+      keptBlanks.unshift(line);
+      runStart = j;
+    } else {
+      break;
+    }
+  }
+  const dir = markerDirective(marker);
+  // 既存の「空行＋マーカー」範囲を、保った空行＋(必要なら)新マーカーで置き換える。新マーカーは
+  // ブロック直前に隣接させる(空行 → マーカー → ブロック)。
+  const replacement = dir ? [...keptBlanks, dir] : [...keptBlanks];
+  lines.splice(runStart, blockLine - runStart, ...replacement);
+  return lines.join('\n');
+}
+
+// ブロックを削除するときの開始オフセット。直前にぶら下がる段階表示マーカー行も巻き込んで消す
+// (でないとマーカーが残り、次のブロックに番号/役割が継承されてしまう)。マーカーが無ければ
+// blockStart をそのまま返す。マーカーの上にある区切りの空行は残す。
+export function deleteStartWithMarkers(source: string, blockStart: number): number {
+  const lines = source.split('\n');
+  let acc = 0;
+  let blockLine = lines.length - 1;
+  for (let i = 0; i < lines.length; i += 1) {
+    const next = acc + lines[i]!.length + 1;
+    if (blockStart < next) {
+      blockLine = i;
+      break;
+    }
+    acc = next;
+  }
+  let topMarker = -1;
+  for (let j = blockLine - 1; j >= 0; j -= 1) {
+    if (BLOCK_MARKER_RE.test(lines[j]!)) topMarker = j;
+    else if (lines[j]!.trim() === '') continue; // 空行はまたいで上のマーカーを探す
+    else break; // 本文に当たったら終了
+  }
+  if (topMarker < 0) return blockStart;
+  let off = 0;
+  for (let i = 0; i < topMarker; i += 1) off += lines[i]!.length + 1;
+  return off;
+}
+
 // 単独行のディレクティブがマーカーなら解釈する(<!-- key/pin/group/step:N/@N -->)。
 function parseMarker(body: string): Marker | null {
   const b = body.trim().toLowerCase();
@@ -391,8 +471,12 @@ function computeSteps(
     if (keyIdx === -1) keyIdx = 0;
   }
   const forceKey = keyFirst && keyIdx >= 0;
+  // manual: step:N / group(直前と同番号)で番号を付けたブロックだけが順に出る。無印は常時表示(step 0)。
+  // key 単独や pin は常時表示(step 0)、番号で出したいときは step:N と併用する。
+  const manual = reveal === 'manual';
   let counter = forceKey ? 2 : 1;
-  let prev = 1;
+  // group は「直前の段の番号」に合わせる。manual で先行する番号がまだ無ければ常時表示(0)に。
+  let prev = manual ? 0 : 1;
   const result = merged.map((m, idx) => {
     const key = idx === keyIdx;
     let step: number;
@@ -402,6 +486,7 @@ function computeSteps(
       step = m.step;
       counter = Math.max(counter, step + 1); // 自動採番が明示ステップを追い越さない
     } else if (m.group) step = prev;
+    else if (manual) step = 0; // 無印ブロックは常時表示
     else {
       step = counter;
       counter += 1;
@@ -431,7 +516,10 @@ function applyDirective(body: string, sink: DirectiveSink): void {
     if (key === 'layout' && (LAYOUTS as string[]).includes(value)) sink.setLayout(value as Layout);
     else if (key === 'class') value.split(/\s+/).forEach((c) => sink.addClass(c));
     else if (key === 'bg' || key === 'background') sink.setBackground(value);
-    else if (key === 'reveal') sink.setReveal(value.toLowerCase() === 'key-first' ? 'key-first' : 'sequential');
+    else if (key === 'reveal') {
+      const v = value.toLowerCase();
+      sink.setReveal(v === 'key-first' ? 'key-first' : v === 'manual' ? 'manual' : 'sequential');
+    }
     return;
   }
   const word = body.toLowerCase();

@@ -1209,6 +1209,117 @@ body {
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
   pointer-events: none;
 }
+.step-badge.actionable {
+  pointer-events: auto;
+  cursor: pointer;
+}
+.step-badge.actionable:hover {
+  filter: brightness(1.12);
+}
+
+/* ブロック単位の段階表示マーカーを選ぶポップオーバー。 */
+/* 右クリック コンテキストメニュー(deckRoot 相対の絶対配置)。 */
+.ctx-menu {
+  position: absolute;
+  z-index: 9;
+  min-width: 180px;
+  padding: 5px;
+  border-radius: 10px;
+  background: var(--ui-panel, #fff);
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.26);
+  border: 1px solid var(--ui-rule, rgba(0, 0, 0, 0.12));
+  font-family: var(--ui-sans);
+}
+.ctx-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 10px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ui-fg, #111);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.ctx-item:hover:not(:disabled) {
+  background: var(--ui-accent);
+  color: #fff;
+}
+.ctx-item:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.ctx-item.has-sub::after {
+  content: '›';
+  opacity: 0.6;
+}
+.ctx-sep {
+  height: 1px;
+  margin: 5px 6px;
+  background: var(--ui-rule, rgba(0, 0, 0, 0.1));
+}
+/* サブメニュー: 親項目ホバーで右に展開。 */
+.ctx-sub {
+  position: absolute;
+  left: 100%;
+  top: -5px;
+  display: none;
+  min-width: 150px;
+  max-height: 60vh;
+  overflow-y: auto;
+  flex-direction: column;
+  padding: 5px;
+  border-radius: 10px;
+  background: var(--ui-panel, #fff);
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.26);
+  border: 1px solid var(--ui-rule, rgba(0, 0, 0, 0.12));
+}
+.ctx-item.has-sub:hover > .ctx-sub {
+  display: flex;
+}
+/* メニューが右寄りのときはサブメニューを左へ開く(画面外クリップ回避)。 */
+.ctx-menu.flip-sub .ctx-sub {
+  left: auto;
+  right: 100%;
+}
+
+/* 複数選択(本文ブロック)のハンドル無し細枠。 */
+.multi-sel-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+.multi-sel-box {
+  position: absolute;
+  border: 1.5px solid var(--ui-accent);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--ui-accent) 12%, transparent);
+}
+
+/* 自由配置ドラッグ中の整列ガイド線(中心・端・他図形に吸着したとき表示)。 */
+.snap-guides {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 7;
+}
+.snap-guide {
+  position: absolute;
+  background: var(--ui-accent);
+  opacity: 0.9;
+}
+.snap-guide.snap-v {
+  width: 1px;
+}
+.snap-guide.snap-h {
+  height: 1px;
+}
 
 /* 図形レイヤ。スライド全面に重ね、図形だけがクリックを受ける。 */
 .ov-shapes {
@@ -2367,48 +2478,6 @@ body.faux-full .deck-root {
 }
 .faux-exit:hover {
   background: rgba(0, 0, 0, 0.7);
-}
-
-/* 段階表示の per-slide コントロール(編集時、スライド下中央に浮かべる)。 */
-.reveal-bar {
-  position: absolute;
-  bottom: 30px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 9;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 6px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--ui-panel) 92%, transparent);
-  border: 1px solid var(--ui-line);
-  box-shadow: var(--shadow-pop);
-  -webkit-backdrop-filter: blur(8px);
-  backdrop-filter: blur(8px);
-}
-.reveal-bar-label {
-  font-size: 11px;
-  color: var(--ui-soft);
-  padding: 0 4px;
-}
-.reveal-bar button {
-  font: inherit;
-  font-size: 12px;
-  border: none;
-  background: transparent;
-  color: var(--ui-soft);
-  border-radius: 999px;
-  padding: 4px 10px;
-  cursor: pointer;
-}
-.reveal-bar button:hover {
-  background: var(--ui-accent-tint);
-  color: var(--ui-accent);
-}
-.reveal-bar button.on {
-  background: var(--ui-accent);
-  color: #fff;
 }
 
 /* 中サイズではデッキ高さに dvh を使い、モバイルのツールバー出没でも崩れにくく。 */
