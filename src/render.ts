@@ -127,11 +127,14 @@ function renderCompare(parts: string[], stepped = false): string {
   if (!parts.length) return '';
   const a = parts[0] ?? '';
   const b = parts.length > 2 ? parts.slice(1).join('') : (parts[1] ?? '');
+  // 右側が空のときは段階表示の対象にしない(空セルで「無反応Next」が出ないように)。
+  const aStep = stepped ? ' data-step="1"' : '';
+  const bStep = stepped && b.trim() ? ' data-step="2"' : '';
   return (
     `<div class="cmp">` +
-    `<div class="cmp-side cmp-a"${stepAttr(stepped, 0)}>${a}</div>` +
+    `<div class="cmp-side cmp-a"${aStep}>${a}</div>` +
     `<div class="cmp-divider" aria-hidden="true"><span class="cmp-vs">vs</span></div>` +
-    `<div class="cmp-side cmp-b"${stepAttr(stepped, 1)}>${b}</div>` +
+    `<div class="cmp-side cmp-b"${bStep}>${b}</div>` +
     `</div>`
   );
 }
@@ -194,16 +197,53 @@ function renderStatItem(seg: string): string {
   return `<figure class="stat">${kick}${fig}${cap}</figure>`;
 }
 
+// セグメント内に #### が複数あれば各 #### で更に分割する(=== 区切りが無くても複数指標を拾う)。
+function splitStatSegments(cols: string[]): string[] {
+  const out: string[] = [];
+  for (const c of cols) {
+    let buf: string[] = [];
+    for (const ln of c.split('\n')) {
+      if (/^####\s/.test(ln.trim()) && buf.some((b) => b.trim())) {
+        out.push(buf.join('\n'));
+        buf = [ln];
+      } else {
+        buf.push(ln);
+      }
+    }
+    if (buf.some((b) => b.trim())) out.push(buf.join('\n'));
+  }
+  return out;
+}
+
 function renderStats(slide: Slide, stepped = false): string {
   const cols = slide.columns;
   if (!cols || !cols.length) return '';
   let lead = '';
-  let items = cols;
-  if (cols.length >= 2 && /^#{1,2}\s/.test(firstNonEmpty(cols[0]!))) {
-    lead = cols[0]!;
-    items = cols.slice(1);
+  let segs: string[];
+  if (cols.length >= 2) {
+    if (/^#{1,2}\s/.test(firstNonEmpty(cols[0]!))) {
+      lead = cols[0]!;
+      segs = splitStatSegments(cols.slice(1));
+    } else {
+      segs = splitStatSegments(cols);
+    }
+  } else {
+    // 単一カラム: 最初の #### より前を(あれば)リード、それ以降を指標に分割。
+    const all = cols[0] ?? '';
+    const idx = all.search(/^####\s/m);
+    if (idx > 0) {
+      lead = all.slice(0, idx).trim();
+      segs = splitStatSegments([all.slice(idx)]);
+    } else if (idx === 0) {
+      segs = splitStatSegments([all]);
+    } else if (/^#{1,2}\s/.test(firstNonEmpty(all))) {
+      lead = all; // 見出しだけ
+      segs = [];
+    } else {
+      segs = [all]; // #### 無しの単一指標
+    }
   }
-  const cells = items
+  const cells = segs
     .map(renderStatItem)
     .filter(Boolean)
     .map((c, i) => c.replace(/^<figure class="stat"/, `<figure class="stat"${stepAttr(stepped, i)}`));
@@ -265,6 +305,7 @@ function renderTimeline(slide: Slide, stepped = false): string {
       const label = eq !== -1 ? content.slice(eq + 3).trim() : content.trim();
       events.push({ time, label, body: [] });
     } else if (events.length) {
+      if (/^\s*===\s*$/.test(line)) continue; // 区切りの === は本文に出さない
       events[events.length - 1]!.body.push(line.trim() === '' ? '' : line.replace(dedent, ''));
     }
   }
@@ -299,21 +340,30 @@ function extractImage(text: string): { src: string; alt: string; rest: string; m
 
 function renderMedia(slide: Slide, side: 'left' | 'right'): string {
   let text: string;
-  let imgText: string;
-  if (slide.columns && slide.columns.length >= 2) {
-    // 画像を含む段を媒体に、残りを本文にする(段の順序に依存しない)。
-    const imgCol = slide.columns.findIndex((c) => IMG_RE.test(c));
-    const mi = imgCol >= 0 ? imgCol : slide.columns.length - 1;
-    imgText = slide.columns[mi] ?? '';
-    text = slide.columns.filter((_, i) => i !== mi).join('\n\n');
+  let src = '';
+  let alt = '';
+  const cols = slide.columns;
+  if (cols && cols.length >= 2) {
+    // 画像を含む段を媒体に、残りを本文に(段の順序に依存しない)。画像が無ければ列を捨てず全部本文。
+    const imgCol = cols.findIndex((c) => IMG_RE.test(c));
+    if (imgCol >= 0) {
+      const ex = extractImage(cols[imgCol]!);
+      src = ex?.src ?? '';
+      alt = ex?.alt ?? '';
+      text = cols.filter((_, i) => i !== imgCol).join('\n\n');
+    } else {
+      text = cols.join('\n\n');
+    }
   } else {
     const ex = extractImage(slide.content);
-    text = ex ? ex.rest : slide.content;
-    imgText = ex ? ex.matched : '';
+    if (ex && ex.src) {
+      src = ex.src;
+      alt = ex.alt;
+      text = ex.rest;
+    } else {
+      text = slide.content;
+    }
   }
-  const ex = extractImage(imgText);
-  let src = ex?.src ?? '';
-  const alt = ex?.alt ?? '';
   if (!src && slide.background && /^(https?:|data:)/.test(slide.background)) src = slide.background;
   const media = src
     ? `<figure class="media-fig" style="background-image:url('${encodeBgUrl(src)}')" role="img" aria-label="${escapeAttr(alt)}"></figure>`

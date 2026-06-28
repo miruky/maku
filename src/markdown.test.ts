@@ -14,6 +14,20 @@ describe('renderMarkdown', () => {
     expect(renderMarkdown('`x = 1`')).toContain('<code>x = 1</code>');
   });
 
+  it('_ の強調は語境界のみ。語中アンダースコア(snake_case / URL)は斜体化しない', () => {
+    expect(renderMarkdown('_斜体_')).toContain('<em>斜体</em>'); // 語境界では有効
+    expect(renderMarkdown('語の _強調_ です')).toContain('<em>強調</em>');
+    const snake = renderMarkdown('let user_id_value = 1');
+    expect(snake).not.toContain('<em>'); // 語中は強調しない
+    expect(snake).toContain('user_id_value'); // アンダースコアを保つ
+    expect(renderMarkdown('see foo_bar_baz here')).toContain('foo_bar_baz');
+    // 日本語の語中アンダースコアも斜体化しない(\p{L} 判定)
+    const jp = renderMarkdown('機能_詳細_を見る');
+    expect(jp).not.toContain('<em>');
+    expect(jp).toContain('機能_詳細_を見る');
+    expect(renderMarkdown('語境界の _強調_ です')).toContain('<em>強調</em>'); // 境界では有効
+  });
+
   it('箇条書き(入れ子)', () => {
     const html = renderMarkdown('- 親\n  - 子\n- 親2');
     expect(html).toContain('<ul>');

@@ -15,6 +15,8 @@ export class Presenter {
   private idx = 0;
   // 現在のステップ(1始まり)。step<=現在 のブロックが見える。0(ピン)は常時表示。
   private step = 1;
+  // 編集中(authoring)は段階表示で隠さず全て見せる。発表/閲覧時のみ実際に段階表示する。
+  private authoring = false;
 
   constructor(
     private readonly els: PresenterEls,
@@ -32,12 +34,28 @@ export class Presenter {
     return this.deck.slides[this.idx];
   }
 
-  setDeck(deck: Deck, keepIndex = true): void {
+  setDeck(deck: Deck, keepIndex = true, animate = false): void {
     this.deck = deck;
     const max = Math.max(0, deck.slides.length - 1);
     this.idx = keepIndex ? Math.min(this.idx, max) : 0;
     this.step = 1;
-    this.render();
+    this.render('fwd', animate);
+    this.step = this.minStep();
+    this.applySteps();
+  }
+
+  // 編集中かどうか。編集中は段階表示で隠さない(全ブロックを見せて編集できるように)。
+  setAuthoring(on: boolean): void {
+    if (this.authoring === on) return;
+    this.authoring = on;
+    // 編集中は段階を進めない=stepが古い値で置き去りになる。切替時に先頭へ戻し、
+    // 発表へ復帰したスライドが途中状態(全表示のまま)で始まらないようにする。
+    this.step = this.minStep();
+    this.applySteps();
+  }
+
+  // 現在スライドの段階表示を先頭へ戻す(発表開始時に呼ぶ。閲覧中に進めた途中状態で始めない)。
+  resetSteps(): void {
     this.step = this.minStep();
     this.applySteps();
   }
@@ -46,13 +64,14 @@ export class Presenter {
     const dir = i < this.idx ? 'back' : 'fwd';
     this.idx = Math.max(0, Math.min(this.total - 1, i));
     this.step = 1;
-    this.render(dir);
+    this.render(dir, true);
     this.step = atEnd ? this.maxStep() : this.minStep();
     this.applySteps();
   }
 
   next(): void {
-    if (this.step < this.maxStep()) {
+    // 編集中は段階表示で隠していない(全部見えている)ので、見えないステップを刻まず次スライドへ。
+    if (!this.authoring && this.step < this.maxStep()) {
       this.step += 1;
       this.applySteps();
       return;
@@ -61,7 +80,7 @@ export class Presenter {
   }
 
   prev(): void {
-    if (this.step > this.minStep()) {
+    if (!this.authoring && this.step > this.minStep()) {
       this.step -= 1;
       this.applySteps();
       return;
@@ -97,25 +116,25 @@ export class Presenter {
   // key-first では、通過済みは frag-past で静かに退き、現在のステップは frag-current で立つ。
   private applySteps(): void {
     const slide = this.current();
-    const active = !!slide && slide.reveal !== 'none';
+    // 編集中(authoring)は隠さない。発表/閲覧時のみ実際に段階表示する。
+    const active = !this.authoring && !!slide && slide.reveal !== 'none';
     const keyFirst = slide?.reveal === 'key-first';
     for (const el of this.stepEls()) {
       const s = Number(el.dataset.step) || 0;
-      const hidden = active && s > this.step;
-      el.classList.toggle('frag-hidden', hidden);
+      el.classList.toggle('frag-hidden', active && s > this.step);
       el.classList.toggle('frag-current', active && s > 0 && s === this.step);
       el.classList.toggle('frag-past', active && keyFirst && s > 0 && s < this.step);
     }
   }
 
-  private render(dir: 'fwd' | 'back' = 'fwd'): void {
+  private render(dir: 'fwd' | 'back' = 'fwd', animate = true): void {
     const slide = this.current();
     this.els.stage.classList.remove('enter', 'enter-back');
-    void this.els.stage.offsetWidth;
+    if (animate) void this.els.stage.offsetWidth;
     this.els.stage.innerHTML = slide
       ? slideHtmlMapped(slide)
       : '<div class="slide"><div class="slide-body"><p class="empty">スライドがありません</p></div></div>';
-    this.els.stage.classList.add(dir === 'back' ? 'enter-back' : 'enter');
+    if (animate) this.els.stage.classList.add(dir === 'back' ? 'enter-back' : 'enter');
 
     this.applySteps();
     const pct = this.total ? ((this.idx + 1) / this.total) * 100 : 0;

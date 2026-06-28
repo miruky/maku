@@ -53,4 +53,20 @@ describe('blockToMd(view → md)', () => {
     const md = '```ts\nconst a = 1;\n```';
     expect(blockToMd(first(md))).toBe(md);
   });
+
+  it('段階表示の番号バッジは本文に直列化しない', () => {
+    // 回帰防止: 編集中に付く .step-badge の数字が見出し/段落に混入し Markdown が壊れていた。
+    const h = first('# 表題');
+    const badge = document.createElement('span');
+    badge.className = 'step-badge';
+    badge.textContent = '1';
+    h.appendChild(badge);
+    expect(blockToMd(h)).toBe('# 表題');
+    const p = first('本文です');
+    const b2 = document.createElement('span');
+    b2.className = 'step-badge';
+    b2.textContent = '常';
+    p.appendChild(b2);
+    expect(blockToMd(p)).toBe('本文です');
+  });
 });

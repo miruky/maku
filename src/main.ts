@@ -1,15 +1,16 @@
 import './style.css';
-import { parseDeck } from './deck';
+import { parseDeck, stripRevealDirectiveLines, type RevealMode } from './deck';
 import { blockToMd } from './edit';
 import { deckFilename, exportPdf, exportPptx, renderSlidePng, slideImageName } from './export';
 import {
   applyOverlay,
   clampBox,
   ensureSlide,
+  fitBoxKeepingAspect,
   isImageShape,
+  isTextShape,
   loadOverlay,
   newId,
-  reindexAfterDelete,
   saveOverlay,
   slideOverlay,
   type Box,
@@ -150,6 +151,16 @@ S キーでノートと発表者タイマーを開けます。
 
 const MD_KEY = 'maku.md';
 
+// localStorage はプライベートモードやポリシーで参照自体が例外になることがある。
+// 起動時の読み取りで落ちて真っ白にならないよう、安全に包む。
+const lsGet = (k: string): string | null => {
+  try {
+    return localStorage.getItem(k);
+  } catch {
+    return null;
+  }
+};
+
 const app = document.getElementById('app');
 if (!app) throw new Error('#app が見つからない');
 
@@ -242,37 +253,169 @@ app.innerHTML = `
     <div class="theme-grid" id="theme-grid"></div>
   </div>
 
-  <div class="overlay help" id="help-overlay" hidden>
-    <div class="help-card">
-      <span class="kicker">Shortcuts</span>
-      <h2>キー操作</h2>
-      <dl>
-        <dt>→ / Space</dt><dd>次へ(段階表示も進む)</dd>
-        <dt>←</dt><dd>戻る</dd>
-        <dt>Home / End</dt><dd>最初 / 最後</dd>
-        <dt>F</dt><dd>全画面</dd>
-        <dt>O</dt><dd>スライド一覧</dd>
-        <dt>S</dt><dd>発表者ノート・タイマー</dd>
-        <dt>E</dt><dd>編集パネル</dd>
-        <dt>T</dt><dd>テーマ選択</dd>
-        <dt>P</dt><dd>書き出し(PDF / PPTX / Google)</dd>
-        <dt>Esc</dt><dd>パネル・全画面を閉じる</dd>
-      </dl>
-      <span class="kicker">Syntax</span>
-      <h2>書き方</h2>
-      <dl>
-        <dt>---</dt><dd>スライド区切り</dd>
-        <dt>&lt;!-- layout: … --&gt;</dt><dd>レイアウト(grid/cards/stats/timeline/quote/section/compare/split/image-left/image-right/center/title/full)</dd>
-        <dt>===</dt><dd>段組・グリッド・各段の区切り</dd>
-        <dt>&lt;!-- reveal: key-first --&gt;</dt><dd>要点を先に、段階表示</dd>
-        <dt>&lt;!-- key --&gt; / &lt;!-- step: N --&gt;</dt><dd>段階表示マーカー(次のブロックに付与)</dd>
-        <dt>&lt;!-- bg: 色/URL --&gt;</dt><dd>背景(色または画像)</dd>
-        <dt>???</dt><dd>発表者ノート</dd>
-      </dl>
-      <p class="help-note">スライド上の文字を直接クリックするとその場で書き換えられ、Markdown側にも即時反映されます(ツールバーの「スライドを直接編集」で切替)。画像はツールバーの画像ボタン・ドラッグ&amp;ドロップ・貼り付けで取り込め、Markdown挿入か自由配置かを選べます。</p>
-      <div class="help-actions">
-        <button class="mini" id="load-sample">サンプルを読み込む</button>
-        <button class="mini" data-close="help-overlay">閉じる</button>
+  <div class="overlay guide" id="help-overlay" hidden>
+    <div class="guide-head">
+      <div class="head-titles">
+        <span class="kicker">Guide</span>
+        <span class="head-title">使い方<span class="head-sub">ヘルプ & FAQ</span></span>
+      </div>
+      <input id="guide-search" type="search" placeholder="検索(段階表示 / 書き出し / 画像 / CORS …)" aria-label="ヘルプ内検索" />
+      <button class="mini" id="load-sample">サンプル</button>
+      <button class="mini" data-close="help-overlay">閉じる</button>
+    </div>
+    <div class="guide-body">
+      <nav class="guide-nav" id="guide-nav">
+        <button data-goto="g-start">はじめに</button>
+        <button data-goto="g-md">Markdown 記法</button>
+        <button data-goto="g-layout">レイアウト</button>
+        <button data-goto="g-reveal">段階表示</button>
+        <button data-goto="g-edit">直接編集</button>
+        <button data-goto="g-image">画像</button>
+        <button data-goto="g-theme">テーマ</button>
+        <button data-goto="g-export">書き出し</button>
+        <button data-goto="g-keys">キーボード</button>
+        <button data-goto="g-faq">FAQ</button>
+        <button data-goto="g-from">他ツールから</button>
+      </nav>
+      <div class="guide-content" id="guide-content">
+        <section class="g-sec" id="g-start">
+          <h3>はじめに</h3>
+          <p>maku は <b>Markdown を書くだけでスライドになる</b>ツールです。すべてブラウザの中で動き、サーバーには何も送りません。流れは「<b>書く → テーマで装う → 発表・書き出し</b>」。</p>
+          <p class="g-warn">⚠️ 作ったデータはこのブラウザの localStorage にだけ保存されます。別の端末・シークレットウィンドウ・サイトデータの消去では消えます。大切な内容は <b>書き出し → Markdown を保存</b> でバックアップしてください。</p>
+        </section>
+
+        <section class="g-sec" id="g-md">
+          <h3>Markdown 記法</h3>
+          <ul>
+            <li><code>---</code>(単独行) … スライドの区切り</li>
+            <li>先頭の <code>---</code> ブロック … フロントマター(<code>title:</code> / <code>theme:</code>)</li>
+            <li>見出し <code>#</code>〜<code>######</code>、<b>**強調**</b>、<i>*斜体*</i>、~~打ち消し~~、<code>\`コード\`</code></li>
+            <li>リンク <code>[文字](URL)</code>、画像 <code>![代替](URL)</code>、引用 <code>&gt;</code>、箇条書き <code>-</code>(入れ子可)、番号 <code>1.</code>、タスク <code>- [ ]</code>、表、コードブロック、水平線</li>
+            <li><code>???</code> 以降 … 発表者ノート(本番では聴衆に見えません)</li>
+          </ul>
+          <pre class="g-code">---
+title: 提案
+theme: ai-hiru-mincho
+---
+
+# タイトル
+
+- 箇条書き
+- **強調** と \`コード\`
+
+???
+ここは発表者ノート。</pre>
+        </section>
+
+        <section class="g-sec" id="g-layout">
+          <h3>レイアウト(14種類)</h3>
+          <p><code>&lt;!-- layout: 名前 --&gt;</code> をスライド先頭に置いて切り替えます。</p>
+          <ul>
+            <li><b>default / center / title / full</b> … 既定・中央寄せ・表紙・全面</li>
+            <li><b>split</b> 段組 / <b>grid</b> 格子 / <b>cards</b> カード / <b>stats</b> 数値強調 / <b>timeline</b> 年表 / <b>quote</b> 引用 / <b>section</b> 章扉 / <b>compare</b> 対比 / <b>image-left・image-right</b> 画像分割</li>
+          </ul>
+          <p><code>===</code>(単独行)で各部を区切ります(split / grid / cards / stats / compare / section / quote / image-左右)。</p>
+          <pre class="g-code">&lt;!-- layout: stats --&gt;
+
+#### 継続率
+98.6%
+前年比 +4.2pt
+
+===
+
+#### 月間処理
+1.2B</pre>
+        </section>
+
+        <section class="g-sec" id="g-reveal">
+          <h3>段階表示(一つずつ見せる)</h3>
+          <p>「開いたら①、→ で②、また → で③…」のように順番に見せる機能です。</p>
+          <p><b>いちばん簡単:</b> 「スライドを直接編集」をオンにすると、スライド下に <b>段階表示</b> の切り替えが出ます。<b>順番に</b> を選ぶだけ。各ブロックに番号バッジが付き、発表で → を押すと順に現れます。</p>
+          <ul>
+            <li><b>順番に</b> … 上から1つずつ表示</li>
+            <li><b>要点先</b> … 先に要点(最初の見出し)を見せ、続きを順に。通過した内容は少し控えめに</li>
+          </ul>
+          <p>編集中は全ブロックが見えています(番号で順序を確認できます)。実際に隠れて段階表示になるのは<b>発表・閲覧のとき</b>です。書き出し(PDF / PPTX / PNG)では畳まれて<b>最終状態(全部表示)</b>になります。</p>
+          <p class="g-note">上級者向けに記法でも指定できます: <code>&lt;!-- reveal: key-first --&gt;</code> と、ブロックの直前に <code>&lt;!-- key --&gt;</code>(要点)・<code>&lt;!-- step: N --&gt;</code>(順番)・<code>&lt;!-- group --&gt;</code>(前と同時)・<code>&lt;!-- pin --&gt;</code>(常に表示)。GUIの「段階表示」で選ぶと、スライド全体のモード <code>&lt;!-- reveal: ... --&gt;</code> が自動で書かれます(各ブロックの key / step / group / pin は手書きで指定します)。</p>
+        </section>
+
+        <section class="g-sec" id="g-edit">
+          <h3>スライドを直接編集</h3>
+          <p>ツールバーの「スライドを直接編集」をオンにします。</p>
+          <ul>
+            <li><b>本文の文字</b> … クリックで選択 → もう一度クリック/ダブルクリックでその場編集。Markdown 側にも即反映されます。本文の<b>位置はレイアウトが決めます</b>(自由には動かしません)。</li>
+            <li><b>自由配置</b> … 左上の挿入ツールバーから <b>テキストボックス・図形・画像</b> を追加。ドラッグで移動、角ハンドルでリサイズ、矢印キーで微調整(Shiftで大きく)、Delete で削除。これらは Markdown には入りません(レイアウト情報として別に保存)。</li>
+          </ul>
+        </section>
+
+        <section class="g-sec" id="g-image">
+          <h3>画像</h3>
+          <ul>
+            <li>取り込み: 挿入ツールバーの画像ボタン / スライドへ<b>ドラッグ&ドロップ</b> / <b>貼り付け</b>(Cmd・Ctrl+V)</li>
+            <li><b>Markdown に挿入</b> するか <b>スライドに自由配置</b> するかを選べます</li>
+            <li>自由配置の画像は角ハンドルで<b>縦横比を保って</b>リサイズ(Shiftで自由変形)</li>
+          </ul>
+          <p class="g-warn">⚠️ 外部URLの画像は、相手サーバーが CORS を許可していないと書き出し(PNG / PPTX)で空になることがあります。取り込んで埋め込むのが確実です。</p>
+        </section>
+
+        <section class="g-sec" id="g-theme">
+          <h3>テーマ</h3>
+          <p><b>T</b> キー、またはツールバーのテーマボタンで <b>264種類</b>から選べます(色名で検索可)。選んだテーマはURLに乗るので、リンクを共有すれば同じ見た目で開けます。本文・リンク・小見出しの配色は全テーマで <b>WCAG AA</b>(コントラスト比4.5以上)を満たします。</p>
+        </section>
+
+        <section class="g-sec" id="g-export">
+          <h3>書き出し</h3>
+          <ul>
+            <li><b>PDF</b> … 各スライドを実寸の画像にして1ページずつ並べます。背景・図形・画像もそのまま含まれます。</li>
+            <li><b>PowerPoint(.pptx)</b> … 各スライドを<b>画像として</b>配置(PowerPoint上での再編集はできません)。発表者ノートも引き継ぎます。</li>
+            <li><b>Google スライド</b> … 同じ .pptx を Google ドライブにアップ →「アプリで開く / スライドのインポート」。</li>
+            <li><b>画像(.png)</b> … 表示中の1枚。<b>Markdown を保存</b> も。<b>ブラウザで印刷</b>する場合は印刷ダイアログで「背景のグラフィック」をON・用紙=横に。</li>
+          </ul>
+          <p class="g-note">段階表示は書き出しでは<b>最終状態</b>(全部表示)になります。外部URLの画像は CORS の都合で空になることがあります。</p>
+        </section>
+
+        <section class="g-sec" id="g-keys">
+          <h3>キーボード</h3>
+          <dl class="g-keys">
+            <dt>→ / Space</dt><dd>次へ(段階表示も進む)</dd>
+            <dt>←</dt><dd>戻る</dd>
+            <dt>Home / End</dt><dd>最初 / 最後</dd>
+            <dt>F</dt><dd>全画面で発表</dd>
+            <dt>O</dt><dd>スライド一覧</dd>
+            <dt>S</dt><dd>発表者ノート・タイマー</dd>
+            <dt>E</dt><dd>Markdown エディタ</dd>
+            <dt>T</dt><dd>テーマ選択</dd>
+            <dt>P</dt><dd>書き出し</dd>
+            <dt>?</dt><dd>このヘルプ</dd>
+            <dt>Esc</dt><dd>開いているダイアログ / 全画面 / 図形選択を閉じる(編集パネル・ノートは E / S で切替)</dd>
+            <dt>矢印 / Shift+矢印</dt><dd>選択中の図形を微調整 / 大きく</dd>
+            <dt>Delete</dt><dd>選択中の図形を削除</dd>
+          </dl>
+        </section>
+
+        <section class="g-sec" id="g-faq">
+          <h3>FAQ</h3>
+          <div class="g-qa"><b>Q. データはどこに保存される？</b><p>このブラウザの localStorage だけです。サーバーには送りません。端末を変えると引き継げないので、大事な内容は Markdown を保存してバックアップを。</p></div>
+          <div class="g-qa"><b>Q. ブラウザ印刷で背景が白くなる</b><p>印刷ダイアログで「背景のグラフィック」をONにしてください(既定でOFFのことが多い)。なお <b>PDF ボタン</b>での書き出しは背景も含めて出力されます。</p></div>
+          <div class="g-qa"><b>Q. PowerPoint で文字を編集したい</b><p>.pptx は各スライドを画像として書き出します(再編集は不可)。文章を直したいときは maku の Markdown を編集して再書き出しを。</p></div>
+          <div class="g-qa"><b>Q. Google スライドに出せる？</b><p>直接の書き出しはありません。.pptx を書き出し、Google スライドの「ファイル → スライドのインポート」で取り込めます。</p></div>
+          <div class="g-qa"><b>Q. 画像が書き出しに出てこない</b><p>外部URLの画像はサーバーが CORS を許可しないとコピーできず、書き出しで空になります。取り込んで埋め込むと確実です。</p></div>
+          <div class="g-qa"><b>Q. 文字が□(豆腐)になる/フォントが違う</b><p>書き出しは閲覧環境のフォントを使います。日本語フォントが無い環境では崩れることがあります。</p></div>
+          <div class="g-qa"><b>Q. 段階表示が書き出しで消える</b><p>仕様です。書き出しは最終状態(全部表示)になります。</p></div>
+          <div class="g-qa"><b>Q. 一覧やリンク共有は？</b><p><b>O</b> でスライド一覧、共有ボタンで現在のURL(テーマ・ページ番号つき)をコピーできます。</p></div>
+          <div class="g-qa"><b>Q. スマホで使える？</b><p>閲覧・スワイプ移動はできます。精密な配置や PDF/PPTX 書き出しはデスクトップ(Chrome 系)が確実です。</p></div>
+        </section>
+
+        <section class="g-sec" id="g-from">
+          <h3>他ツールから</h3>
+          <dl class="g-keys">
+            <dt>スライド区切り</dt><dd><code>---</code>(Marp / Slidev / reveal と同じ)</dd>
+            <dt>発表者ノート</dt><dd><code>???</code> 以降</dd>
+            <dt>段組</dt><dd><code>&lt;!-- layout: split --&gt;</code> + <code>===</code></dd>
+            <dt>段階表示</dt><dd>GUIの「段階表示」、または <code>&lt;!-- reveal: … --&gt;</code></dd>
+            <dt>テーマ</dt><dd>フロントマターの <code>theme:</code> か T キー</dd>
+          </dl>
+        </section>
       </div>
     </div>
   </div>
@@ -371,14 +514,18 @@ barActions.addEventListener('focusin', (e) => {
   if (btn) placeTip(btn);
 });
 barActions.addEventListener('focusout', hideTip);
-barActions.addEventListener('click', hideTip);
+barActions.addEventListener('click', (e) => {
+  hideTip();
+  // クリック後はフォーカスを外し、続く矢印/スペースがボタンに吸われないように。
+  (e.target as HTMLElement).closest<HTMLElement>('.ico')?.blur();
+});
 window.addEventListener('scroll', hideTip, true);
 window.addEventListener('resize', hideTip);
 
 const presenter = new Presenter(
   { stage, progress: $('progress'), counter: $('counter'), notes: $('notes-body') },
   (i) => {
-    if (location.hash !== `#${i + 1}`) history.replaceState(null, '', `#${i + 1}${themeQuery()}`);
+    if (location.hash !== `#${i + 1}`) history.replaceState(null, '', urlFor(i + 1));
     const lr = document.getElementById('live-region');
     if (lr) lr.textContent = `スライド ${i + 1} / ${presenter.total}`;
   },
@@ -389,11 +536,14 @@ let currentTheme = themeById(readTheme());
 
 function readTheme(): string {
   const params = new URLSearchParams(location.search);
-  return params.get('theme') ?? localStorage.getItem('maku.theme') ?? DEFAULT_THEME_ID;
+  return params.get('theme') ?? lsGet('maku.theme') ?? DEFAULT_THEME_ID;
 }
 
-function themeQuery(): string {
-  return `?theme=${currentTheme.id}`;
+// テーマは本来のクエリ文字列(? は # の前)に、スライド番号はフラグメント(#N)に置く。
+// 旧実装は #N?theme=… とフラグメント内にクエリを入れていたため、location.search から読めず
+// (共有でテーマ喪失)、Number('#N?theme=…') が NaN になり(リロードで毎回1枚目)になっていた。
+function urlFor(slide1: number): string {
+  return `${location.pathname}?theme=${currentTheme.id}#${slide1}`;
 }
 
 function setTheme(id: string, persist = true): void {
@@ -406,13 +556,14 @@ function setTheme(id: string, persist = true): void {
     } catch {
       // 保存できなくても表示は反映する
     }
-    history.replaceState(null, '', `#${presenter.index + 1}${themeQuery()}`);
+    history.replaceState(null, '', urlFor(presenter.index + 1));
   }
 }
 
 function rebuild(keepIndex = true): void {
   const deck = parseDeck(mdInput.value);
-  presenter.setDeck(deck, keepIndex);
+  // 編集での再描画(keepIndex)は入場アニメを再生しない(選択枠のズレ防止)。読み込み時のみアニメ。
+  presenter.setDeck(deck, keepIndex, !keepIndex);
   barTitle.textContent = deck.meta.title ?? '';
   try {
     localStorage.setItem(MD_KEY, mdInput.value);
@@ -425,10 +576,13 @@ function rebuild(keepIndex = true): void {
 // 文字内容だけが Markdown。位置・サイズ・図形は overlay(localStorage)に持ち、md は汚さない。
 // 描画ブロックは data-src(原文の絶対オフセット)と data-bi(描画順index)を持つ。
 const LIVE_KEY = 'maku.liveedit';
-let liveEdit = localStorage.getItem(LIVE_KEY) !== 'off';
+let liveEdit = lsGet(LIVE_KEY) !== 'off';
 let presenting = false;
 let viewDirty = false;
+// editingBlock: 編集中の要素。md ブロック(kind 'block')か、テキスト図形の .ov-text(kind 'text')。
 let editingBlock: HTMLElement | null = null;
+let editingKind: 'block' | 'text' = 'block';
+let editingShapeId = '';
 let editStart = 0;
 let editEnd = 0;
 const overlay = loadOverlay();
@@ -449,10 +603,10 @@ function persistMd(): void {
   }
 }
 
-// ── 選択・移動・リサイズ ──
-type Selection =
-  | { kind: 'block'; el: HTMLElement; index: number }
-  | { kind: 'shape'; el: HTMLElement; id: string };
+// ── 選択・編集 ──
+// block: Markdown 本文ブロック(レイアウトが配置。その場でテキスト編集のみ、自由移動はしない)。
+// shape: 自由配置のオーバーレイ要素(テキストボックス/図形/画像。移動・リサイズ・削除できる)。
+type Selection = { kind: 'block'; el: HTMLElement } | { kind: 'shape'; el: HTMLElement; id: string };
 let sel: Selection | null = null;
 
 // 選択枠(8ハンドル)。stageは再描画で中身が入れ替わるので deckRoot 側に置く。
@@ -463,6 +617,13 @@ frame.innerHTML = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w']
   .map((h) => `<div class="sel-h sel-${h}" data-h="${h}"></div>`)
   .join('');
 deckRoot.appendChild(frame);
+
+// 段階表示の番号バッジを描く専用レイヤ。ブロック内に入れるとレイアウトのパディングや
+// overflow と衝突し、本文(Markdown)へ混入する恐れもあるため、計測した座標でこの層に重ねる。
+const stepLayer = document.createElement('div');
+stepLayer.className = 'step-badge-layer';
+stepLayer.setAttribute('aria-hidden', 'true');
+deckRoot.appendChild(stepLayer);
 
 // 挿入ツールバー。
 const insertBar = document.createElement('div');
@@ -527,34 +688,120 @@ document.addEventListener('click', (e) => {
   }
 });
 
-function slideEl(): HTMLElement | null {
-  return stage.querySelector<HTMLElement>('.slide');
+// ── 段階表示の per-slide コントロール(なし / 順番に / 要点先) ──
+const revealBar = document.createElement('div');
+revealBar.className = 'reveal-bar';
+revealBar.hidden = true;
+revealBar.innerHTML =
+  '<span class="reveal-bar-label">段階表示</span>' +
+  '<button data-reveal="none" type="button">なし</button>' +
+  '<button data-reveal="sequential" type="button">順番に</button>' +
+  '<button data-reveal="key-first" type="button">要点先</button>';
+deckRoot.appendChild(revealBar);
+revealBar.addEventListener('pointerdown', (e) => e.stopPropagation());
+revealBar.addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-reveal]');
+  if (b) {
+    setSlideReveal(b.dataset.reveal as RevealMode);
+    b.blur(); // フォーカスを残すと keydown ガードが矢印/スペースを飲み込み移動できなくなる
+  }
+});
+
+// 現在スライドの段階表示モードを Markdown のディレクティブとして設定する。
+function setSlideReveal(mode: RevealMode): void {
+  commitEdit(); // 進行中のテキスト編集を overlay に確定してから再描画(未確定テキストの消失を防ぐ)
+  // parseDeck は \n 正規化後のオフセットを返す。textarea に \r が残っていると slice がずれるので揃える。
+  if (mdInput.value.includes('\r')) mdInput.value = mdInput.value.replace(/\r\n?/g, '\n');
+  const deck = parseDeck(mdInput.value);
+  const slide = deck.slides[presenter.index];
+  if (!slide) return;
+  const v = mdInput.value;
+  const start = slide.srcStart;
+  const end = slide.srcEnd;
+  // 既存の reveal / incremental / fragment ディレクティブ行を取り除く(フェンス内の例示は残す)。先頭の空行も保つ。
+  let region = stripRevealDirectiveLines(v.slice(start, end));
+  if (mode !== 'none') region = `<!-- reveal: ${mode} -->\n` + region;
+  mdInput.value = v.slice(0, start) + region + v.slice(end);
+  persistMd();
+  rebuild(true);
+  toast(
+    mode === 'none' ? '段階表示をオフにしました' : mode === 'key-first' ? '段階表示: 要点を先に' : '段階表示: 順番に',
+  );
 }
 
-// 要素の現在位置を、スライドに対する%の箱として返す。
-function rectPct(el: HTMLElement): Box {
-  const sr = (slideEl() ?? stage).getBoundingClientRect();
-  const er = el.getBoundingClientRect();
-  return {
-    x: ((er.left - sr.left) / sr.width) * 100,
-    y: ((er.top - sr.top) / sr.height) * 100,
-    w: (er.width / sr.width) * 100,
-    h: (er.height / sr.height) * 100,
-  };
+// 段階表示バッジ(専用レイヤ)を空にする。
+function clearStepBadges(): void {
+  stepLayer.replaceChildren();
+}
+
+// 現在スライドの段階表示モード。表示は「書かれた指定」に合わせる(段組系で key-first が内部的に
+// sequential へ降格されても、ユーザーが押したボタンを正しく光らせる。降格は挙動上 sequential と同義)。
+// 行全体がコメントの行だけを directive とみなす(パーサと一致。本文中の文字列リテラルで誤検出しない)。
+function currentRevealMode(): RevealMode {
+  const cur = presenter.current();
+  let mode: RevealMode = cur?.reveal ?? 'none';
+  if (cur) {
+    const src = mdInput.value.slice(cur.srcStart, cur.srcEnd);
+    if (/^[ \t]*<!--[ \t]*reveal[ \t]*:[ \t]*key-first[ \t]*-->[ \t]*$/im.test(src)) mode = 'key-first';
+    else if (/^[ \t]*<!--[ \t]*(?:incremental|reveal[ \t]*:[ \t]*sequential)[ \t]*-->[ \t]*$/im.test(src)) mode = 'sequential';
+  }
+  return mode;
+}
+
+// 各 [data-step] ブロックの位置を実測し、専用レイヤに番号バッジを左上隅へ重ねる。
+// レイヤは deckRoot 直下なので段組の overflow:hidden でも切れず、本文にも混入しない。
+function positionStepBadges(): void {
+  clearStepBadges();
+  if (!liveEdit || presenting) return;
+  if (currentRevealMode() === 'none') return;
+  const dr = deckRoot.getBoundingClientRect();
+  for (const el of stage.querySelectorAll<HTMLElement>('.slide-body [data-step]')) {
+    const r = el.getBoundingClientRect();
+    if (r.width === 0 && r.height === 0) continue; // 非表示要素は飛ばす
+    const s = Number(el.dataset.step) || 0;
+    const badge = document.createElement('span');
+    badge.className = 'step-badge';
+    badge.textContent = s === 0 ? '常' : String(s);
+    stepLayer.appendChild(badge);
+    // バッジの実寸を測り、ブロック左上の角に少しはみ出して載せる(通知バッジ風。本文に被りにくい)。
+    // 端ぴったりのブロック(full レイアウト等)で負座標になると deckRoot の overflow/角丸で切れるため 0 以上に。
+    const bw = badge.offsetWidth || 18;
+    const bh = badge.offsetHeight || 18;
+    badge.style.left = `${Math.max(0, r.left - dr.left - bw * 0.35)}px`;
+    badge.style.top = `${Math.max(0, r.top - dr.top - bh * 0.35)}px`;
+  }
+}
+
+// 段階表示に対応しないレイアウト(これらは reveal を常に none に落とす)。バーを出さない。
+const NO_REVEAL_LAYOUTS = ['quote', 'section', 'image-left', 'image-right'];
+function updateRevealUi(): void {
+  const cur = presenter.current();
+  const noReveal = !!cur && NO_REVEAL_LAYOUTS.includes(cur.layout);
+  const enable = liveEdit && !presenting && !noReveal;
+  revealBar.hidden = !enable;
+  if (!enable) {
+    clearStepBadges();
+    return;
+  }
+  const mode = currentRevealMode();
+  for (const b of revealBar.querySelectorAll<HTMLButtonElement>('button[data-reveal]')) {
+    b.classList.toggle('on', b.dataset.reveal === mode);
+  }
+  positionStepBadges();
+}
+
+function slideEl(): HTMLElement | null {
+  return stage.querySelector<HTMLElement>('.slide');
 }
 
 function findShape(id: string): Shape | undefined {
   return overlay[presenter.index]?.shapes.find((s) => s.id === id);
 }
 
-function currentBox(s: Selection): Box {
-  if (s.kind === 'shape') {
-    const sh = findShape(s.id);
-    return sh ? { x: sh.x, y: sh.y, w: sh.w, h: sh.h } : rectPct(s.el);
-  }
-  const p = overlay[presenter.index]?.blocks[s.index];
-  const r = rectPct(s.el);
-  return p ? { x: p.x, y: p.y, w: p.w, h: p.h ?? r.h } : r;
+// 選択中の図形の現在の箱(%)。図形がなければ無難な既定値。
+function currentBox(id: string): Box {
+  const sh = findShape(id);
+  return sh ? { x: sh.x, y: sh.y, w: sh.w, h: sh.h } : { x: 0, y: 0, w: 10, h: 10 };
 }
 
 function positionFrame(): void {
@@ -568,12 +815,12 @@ function positionFrame(): void {
   frame.style.top = `${er.top - dr.top}px`;
   frame.style.width = `${er.width}px`;
   frame.style.height = `${er.height}px`;
-  frame.dataset.kind = sel.kind;
+  frame.dataset.kind = sel.kind; // CSS: block=枠のみ / shape=8ハンドル付き
   frame.hidden = false;
 }
 
 function selectBlock(el: HTMLElement): void {
-  sel = { kind: 'block', el, index: Number(el.dataset.bi ?? 0) };
+  sel = { kind: 'block', el };
   positionFrame();
 }
 function selectShape(el: HTMLElement): void {
@@ -585,48 +832,48 @@ function deselect(): void {
   frame.hidden = true;
 }
 
-// 箱を選択要素へ反映(overlayと要素スタイル両方)。
-function applyBox(box: Box, resizingHeight: boolean): void {
-  if (!sel) return;
-  if (sel.kind === 'shape') {
-    const sh = findShape(sel.id);
-    if (sh) {
-      sh.x = box.x;
-      sh.y = box.y;
-      sh.w = box.w;
-      sh.h = box.h;
-    }
-    sel.el.style.left = `${box.x}%`;
-    sel.el.style.top = `${box.y}%`;
-    sel.el.style.width = `${box.w}%`;
-    sel.el.style.height = `${box.h}%`;
-  } else {
-    const o = ensureSlide(overlay, presenter.index);
-    const prev = o.blocks[sel.index];
-    const h = resizingHeight ? box.h : prev?.h;
-    o.blocks[sel.index] = { x: box.x, y: box.y, w: box.w, ...(h != null ? { h } : {}) };
-    sel.el.style.position = 'absolute';
-    sel.el.style.left = `${box.x}%`;
-    sel.el.style.top = `${box.y}%`;
-    sel.el.style.width = `${box.w}%`;
-    sel.el.style.maxWidth = 'none';
-    sel.el.style.height = h != null ? `${h}%` : '';
-    sel.el.classList.add('ov-placed');
+// 箱を選択中の図形へ反映(overlayデータと要素スタイル両方)。図形(shape)専用。
+function applyBox(box: Box): void {
+  if (sel?.kind !== 'shape') return;
+  const sh = findShape(sel.id);
+  if (sh) {
+    sh.x = box.x;
+    sh.y = box.y;
+    sh.w = box.w;
+    sh.h = box.h;
   }
+  sel.el.style.left = `${box.x}%`;
+  sel.el.style.top = `${box.y}%`;
+  sel.el.style.width = `${box.w}%`;
+  sel.el.style.height = `${box.h}%`;
   positionFrame();
 }
 
 function resizeBox(b: Box, handle: string, dx: number, dy: number): Box {
+  const MIN = 3; // clampBox と同じ最小%。これ未満に潰さない。
   const r = { ...b };
-  if (handle.includes('e')) r.w = b.w + dx;
-  if (handle.includes('s')) r.h = b.h + dy;
+  // 各ハンドルは「反対側の辺」を固定する。動かす辺をスライド枠(0–100)と最小サイズの範囲に
+  // 収めたうえで寸法を逆算するので、壁際でも固定辺が動かず(後段の clampBox でも揺れない)。
+  if (handle.includes('e')) {
+    // 左端固定 → 右端を [x+MIN, 100] に。
+    r.w = Math.max(MIN, Math.min(b.w + dx, 100 - b.x));
+  }
+  if (handle.includes('s')) {
+    r.h = Math.max(MIN, Math.min(b.h + dy, 100 - b.y));
+  }
   if (handle.includes('w')) {
-    r.w = b.w - dx;
-    r.x = b.x + dx;
+    // 右端固定 → 左端を [0, right-MIN] に収め、幅は右端から逆算。
+    const right = b.x + b.w;
+    const nx = Math.max(0, Math.min(b.x + dx, right - MIN));
+    r.x = nx;
+    r.w = right - nx;
   }
   if (handle.includes('n')) {
-    r.h = b.h - dy;
-    r.y = b.y + dy;
+    // 下端固定 → 上端を [0, bottom-MIN] に収め、高さは下端から逆算。
+    const bottom = b.y + b.h;
+    const ny = Math.max(0, Math.min(b.y + dy, bottom - MIN));
+    r.y = ny;
+    r.h = bottom - ny;
   }
   return r;
 }
@@ -640,77 +887,86 @@ let drag: {
   moved: boolean;
   reselect: boolean;
 } | null = null;
+// 1ジェスチャ中に図形を実際に動かしたか(スワイプ移動と区別するため)。
+let draggedThisGesture = false;
 
 deckRoot.addEventListener('pointerdown', (e) => {
   if (!liveEdit || presenting) return;
-  const t = e.target as HTMLElement;
-  // 編集中に外側をクリックしたら確定だけして抜ける(再描画でDOMが入れ替わるため)。
+  if (drag) return; // 進行中のドラッグ中は二本目以降のポインタを無視
+  let t = e.target as HTMLElement;
+  // 編集中に外側を押したら確定。確定で再描画/図形再生成が起きて元の要素が切り離されるので、
+  // ブロック編集・テキスト箱編集のどちらでも、押した座標から要素を取り直す。
   if (editingBlock && !editingBlock.contains(t)) {
     commitEdit();
-    deselect();
-    return;
+    // commit でテキスト箱の選択枠が再表示されることがある。直後の座標解決が旧枠のハンドルを
+    // 拾って誤ってリサイズを始めないよう、いったん枠を隠してから本当の対象を取り直す。
+    frame.hidden = true;
+    t = (document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null) ?? t;
   }
+  // 編集中の要素の内側を押したときは素通し。caret配置・テキスト選択はブラウザに任せ、
+  // 余計な preventDefault や図形ドラッグを起こさない(編集中は選択枠が隠れハンドルも無い)。
+  if (editingBlock && editingBlock.contains(t)) return;
+  // 図形のリサイズハンドル(図形選択中のみ)。
   const handle = t.closest<HTMLElement>('.sel-h');
-  if (handle && sel) {
+  if (handle && sel?.kind === 'shape') {
     e.preventDefault();
-    drag = { mode: 'resize', handle: handle.dataset.h ?? '', startX: e.clientX, startY: e.clientY, box: currentBox(sel), moved: false, reselect: true };
+    drag = { mode: 'resize', handle: handle.dataset.h ?? '', startX: e.clientX, startY: e.clientY, box: currentBox(sel.id), moved: false, reselect: false };
     deckRoot.setPointerCapture(e.pointerId);
     return;
   }
+  // 自由配置の図形/テキスト/画像 → 選択して移動ドラッグ開始。
   const shape = t.closest<HTMLElement>('.ov-shape');
   if (shape) {
     e.preventDefault();
-    const was = sel?.kind === 'shape' && sel.el === shape;
+    const id = shape.dataset.sid ?? '';
+    const was = sel?.kind === 'shape' && sel.id === id;
     selectShape(shape);
-    drag = { mode: 'move', handle: '', startX: e.clientX, startY: e.clientY, box: currentBox(sel!), moved: false, reselect: !!was };
+    drag = { mode: 'move', handle: '', startX: e.clientX, startY: e.clientY, box: currentBox(id), moved: false, reselect: was };
     deckRoot.setPointerCapture(e.pointerId);
     return;
   }
+  // Markdown ブロック → 選択(枠のみ)。すでに選択済みのブロックを再度押したら文字編集へ。
   const block = t.closest<HTMLElement>('.slide-body [data-src]');
   if (block) {
-    if (editingBlock === block) return; // 編集中のブロック内クリックは通常操作
     e.preventDefault();
-    const was = sel?.kind === 'block' && sel.el === block;
-    selectBlock(block);
-    drag = { mode: 'move', handle: '', startX: e.clientX, startY: e.clientY, box: currentBox(sel!), moved: false, reselect: !!was };
-    deckRoot.setPointerCapture(e.pointerId);
+    if (sel?.kind === 'block' && sel.el === block) enterEditBlock(block, { x: e.clientX, y: e.clientY });
+    else selectBlock(block);
     return;
   }
+  // どれにも当たらない。直接編集に未対応なレイアウトのテキストなら案内する。
   if (t.closest('.stage')) {
-    commitEdit();
+    const s = slideEl();
+    if (t.closest('.slide-body') && s && !s.querySelector('[data-src]')) {
+      toast('このレイアウトの文字は Markdownエディタ(E)で編集できます');
+    }
     deselect();
   }
 });
 
 deckRoot.addEventListener('pointermove', (e) => {
-  if (!drag || !sel) return;
+  if (!drag || sel?.kind !== 'shape') return;
   const sr = (slideEl() ?? stage).getBoundingClientRect();
   const dx = ((e.clientX - drag.startX) / sr.width) * 100;
   const dy = ((e.clientY - drag.startY) / sr.height) * 100;
-  if (Math.abs(e.clientX - drag.startX) + Math.abs(e.clientY - drag.startY) > 3) drag.moved = true;
+  if (Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY) > 4) {
+    drag.moved = true;
+    draggedThisGesture = true;
+  }
   let box: Box;
-  let resizingHeight = false;
   if (drag.mode === 'move') {
-    box = { ...drag.box, x: drag.box.x + dx, y: drag.box.y + dy };
+    box = clampBox({ ...drag.box, x: drag.box.x + dx, y: drag.box.y + dy });
   } else {
     box = resizeBox(drag.box, drag.handle, dx, dy);
-    resizingHeight = drag.handle.includes('n') || drag.handle.includes('s');
-    // 画像は縦横比を保つ(Shiftで自由変形)。北側ハンドルは下端を固定する。
-    if (sel.kind === 'shape') {
-      const sh = findShape(sel.id);
-      if (sh && isImageShape(sh) && sh.ar && !e.shiftKey) {
-        const bottom = box.y + box.h;
-        const h = (box.w * (16 / 9)) / sh.ar;
-        if (drag.handle.includes('n')) box.y = bottom - h;
-        box.h = h;
-        resizingHeight = true;
-      }
-    }
+    const sh = findShape(sel.id);
+    box =
+      sh && isImageShape(sh) && typeof sh.ar === 'number' && Number.isFinite(sh.ar) && sh.ar > 0 && !e.shiftKey
+        ? lockAspect(drag.box, box, drag.handle, sh.ar)
+        : clampBox(box);
   }
-  applyBox(clampBox(box), resizingHeight);
+  applyBox(box);
 });
 
-deckRoot.addEventListener('pointerup', (e) => {
+function endDrag(e: PointerEvent): void {
   if (!drag) return;
   try {
     deckRoot.releasePointerCapture(e.pointerId);
@@ -719,21 +975,67 @@ deckRoot.addEventListener('pointerup', (e) => {
   }
   const clicked = !drag.moved;
   const reselect = drag.reselect;
+  const mode = drag.mode;
   drag = null;
   if (clicked) {
-    // 移動なしのクリック: すでに選択済みのテキストブロックを再クリック → 文字編集へ
-    if (sel?.kind === 'block' && reselect) enterEdit(sel.el);
-  } else {
-    saveOverlay(overlay);
+    // 移動なしのクリック: 既選択のテキスト図形を再クリック → 文字編集へ。
+    if (mode === 'move' && reselect && sel?.kind === 'shape') {
+      const sh = findShape(sel.id);
+      if (sh && isTextShape(sh)) enterEditText(sel.el, sel.id);
+    }
+  } else if (!saveOverlay(overlay)) {
+    toast('保存できませんでした(容量超過の可能性)');
+  }
+}
+deckRoot.addEventListener('pointerup', endDrag);
+deckRoot.addEventListener('pointercancel', endDrag);
+deckRoot.addEventListener('lostpointercapture', () => {
+  if (drag) {
+    if (drag.moved) saveOverlay(overlay);
+    drag = null;
   }
 });
 
+// 画像の縦横比固定リサイズ。掴んだハンドルが動かす辺で寸法を決め、反対側を固定し、枠内に収める。
+function lockAspect(start: Box, box: Box, handle: string, ar: number): Box {
+  const ratioH = 16 / 9 / ar; // 幅%あたりの高さ%
+  const horiz = handle.includes('e') || handle.includes('w');
+  const vert = handle.includes('n') || handle.includes('s');
+  let w = box.w;
+  let h = box.h;
+  if (vert && !horiz) {
+    w = h / ratioH; // 縦辺は高さ駆動
+  } else {
+    h = w * ratioH; // 横辺・角は幅駆動
+  }
+  const anchorX: 'l' | 'r' | 'c' = handle.includes('w') ? 'r' : handle.includes('e') ? 'l' : 'c';
+  const anchorY: 't' | 'b' | 'c' = handle.includes('n') ? 'b' : handle.includes('s') ? 't' : 'c';
+  let x = start.x;
+  let y = start.y;
+  if (anchorX === 'r') x = start.x + start.w - w;
+  else if (anchorX === 'c') x = start.x + start.w / 2 - w / 2;
+  if (anchorY === 'b') y = start.y + start.h - h;
+  else if (anchorY === 'c') y = start.y + start.h / 2 - h / 2;
+  return fitBoxKeepingAspect({ ...box, x, y, w, h }, anchorX, anchorY);
+}
+
 deckRoot.addEventListener('dblclick', (e) => {
   if (!liveEdit || presenting) return;
-  const block = (e.target as HTMLElement).closest<HTMLElement>('.slide-body [data-src]');
+  const t = e.target as HTMLElement;
+  const block = t.closest<HTMLElement>('.slide-body [data-src]');
   if (block) {
     selectBlock(block);
-    enterEdit(block);
+    enterEditBlock(block, { x: e.clientX, y: e.clientY });
+    return;
+  }
+  const shape = t.closest<HTMLElement>('.ov-shape');
+  const id = shape?.dataset.sid;
+  if (shape && id) {
+    const sh = findShape(id);
+    if (sh && isTextShape(sh)) {
+      selectShape(shape);
+      enterEditText(shape, id);
+    }
   }
 });
 
@@ -744,7 +1046,38 @@ function editTargets(block: HTMLElement): HTMLElement[] {
   return [block];
 }
 
-function enterEdit(block: HTMLElement): void {
+// クリック/タップした座標にキャレットを落とす(対応ブラウザのみ)。座標が編集可能ターゲットの
+// 内側に解決できたときだけ適用し、そのターゲットへフォーカスを合わせる。コードのパディングや
+// 言語ラベル・表の枠など編集不可領域に落ちた場合は既定のキャレット(focus直後)を保つ。
+function placeCaretAtPoint(x: number, y: number, targets: HTMLElement[]): void {
+  const s = window.getSelection();
+  if (!s) return;
+  type CaretDoc = Document & {
+    caretRangeFromPoint?: (x: number, y: number) => Range | null;
+    caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
+  };
+  const d = document as CaretDoc;
+  let range: Range | null = null;
+  if (d.caretRangeFromPoint) {
+    range = d.caretRangeFromPoint(x, y);
+  } else if (d.caretPositionFromPoint) {
+    const p = d.caretPositionFromPoint(x, y);
+    if (p) {
+      range = document.createRange();
+      range.setStart(p.offsetNode, p.offset);
+      range.collapse(true);
+    }
+  }
+  if (!range) return;
+  const host = targets.find((t) => t.contains(range.startContainer));
+  if (!host) return; // 編集可能領域の外に落ちた → 既定キャレットのまま(打鍵消失を防ぐ)
+  host.focus(); // キャレットのあるセル/要素へフォーカス(表のハイライト不一致も解消)
+  s.removeAllRanges();
+  s.addRange(range);
+}
+
+// md ブロックのその場編集に入る。押した座標があればそこへキャレットを置く(先頭固定を避ける)。
+function enterEditBlock(block: HTMLElement, caretAt?: { x: number; y: number }): void {
   if (editingBlock === block) return;
   commitEdit();
   const targets = editTargets(block);
@@ -753,31 +1086,75 @@ function enterEdit(block: HTMLElement): void {
     t.spellcheck = false;
   }
   editingBlock = block;
+  editingKind = 'block';
   [editStart, editEnd] = rangeOf(block);
   deckRoot.classList.add('editing');
   frame.hidden = true;
-  const focusEl = targets[0] ?? block;
-  focusEl.focus();
+  (targets[0] ?? block).focus();
+  if (caretAt) placeCaretAtPoint(caretAt.x, caretAt.y, targets);
+}
+
+// テキスト図形の文字編集に入る(内容は overlay に保存。md は触らない)。
+function enterEditText(shapeEl: HTMLElement, id: string): void {
+  commitEdit();
+  const fresh = stage.querySelector<HTMLElement>(`.ov-shape[data-sid="${id}"]`) ?? shapeEl;
+  const tx = fresh.querySelector<HTMLElement>('.ov-text');
+  if (!tx) return;
+  const sh = findShape(id);
+  const wasEmpty = !!(sh && isTextShape(sh) && sh.text.trim() === '');
+  if (wasEmpty) tx.textContent = ''; // プレースホルダを消す
+  tx.setAttribute('contenteditable', 'true');
+  tx.spellcheck = false;
+  sel = { kind: 'shape', el: fresh, id };
+  editingBlock = tx;
+  editingKind = 'text';
+  editingShapeId = id;
+  deckRoot.classList.add('editing');
+  frame.hidden = true;
+  tx.focus();
+  // 既存文字はキャレットを末尾に置く(全選択して1打目で全消しになる事故を防ぐ)。空箱だけ先頭に。
   const r = document.createRange();
-  r.selectNodeContents(focusEl);
-  r.collapse(false);
+  r.selectNodeContents(tx);
+  r.collapse(wasEmpty ? true : false);
   const s = window.getSelection();
   s?.removeAllRanges();
   s?.addRange(r);
 }
 
+function textOf(el: HTMLElement): string {
+  return (el.innerText ?? el.textContent ?? '')
+    .replace(/\u00a0/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/\s+$/, '');
+}
+
 function commitEdit(): void {
-  if (editingBlock) {
-    for (const t of editTargets(editingBlock)) t.removeAttribute('contenteditable');
+  if (!editingBlock) {
+    flushView();
+    return;
+  }
+  if (editingKind === 'text') {
     editingBlock.removeAttribute('contenteditable');
+    const sh = findShape(editingShapeId);
+    if (sh && isTextShape(sh)) {
+      sh.text = textOf(editingBlock);
+      saveOverlay(overlay);
+    }
     editingBlock = null;
     deckRoot.classList.remove('editing');
+    decorateStage();
+    return;
   }
+  for (const t of editTargets(editingBlock)) t.removeAttribute('contenteditable');
+  editingBlock.removeAttribute('contenteditable');
+  editingBlock = null;
+  deckRoot.classList.remove('editing');
   flushView();
 }
 
 stage.addEventListener('input', () => {
   if (!editingBlock || !liveEdit) return;
+  if (editingKind === 'text') return; // テキスト図形は commit 時にまとめて反映
   const md = blockToMd(editingBlock);
   const delta = md.length - (editEnd - editStart);
   const v = mdInput.value;
@@ -818,7 +1195,7 @@ function insertShape(kind: VectorKind): void {
   const o = ensureSlide(overlay, presenter.index);
   const shape: Shape = { id: newId(), kind, ...defaultShapeBox(kind) };
   o.shapes.push(shape);
-  saveOverlay(overlay);
+  if (!saveOverlay(overlay)) toast('保存できませんでした(容量超過の可能性)'); // 他の挿入経路と同じく失敗を通知
   decorateStage();
   const el = stage.querySelector<HTMLElement>(`.ov-shape[data-sid="${shape.id}"]`);
   if (el) selectShape(el);
@@ -872,9 +1249,10 @@ function imageBox(ar: number, at?: { x: number; y: number }): Box {
 }
 
 function addFreeImage(src: string, alt: string, at?: { x: number; y: number }): void {
+  const idx = presenter.index; // 非同期ロード完了までに移動しても、配置先スライドを固定する
   const probe = new Image();
   const place = (ar: number): void => {
-    const o = ensureSlide(overlay, presenter.index);
+    const o = ensureSlide(overlay, idx);
     const box = imageBox(ar, at);
     const shape: ImageShape = { id: newId(), kind: 'image', src, alt, ar, ...box };
     o.shapes.push(shape);
@@ -883,12 +1261,19 @@ function addFreeImage(src: string, alt: string, at?: { x: number; y: number }): 
       toast('保存容量を超えました。画像を縮小するか、数を減らしてください');
       return;
     }
-    decorateStage();
-    const el = stage.querySelector<HTMLElement>(`.ov-shape[data-sid="${shape.id}"]`);
-    if (el) selectShape(el);
+    // 配置先スライドを今表示しているときだけ再描画して選択する(移動済みなら保存だけ)。
+    if (presenter.index === idx) {
+      decorateStage();
+      const el = stage.querySelector<HTMLElement>(`.ov-shape[data-sid="${shape.id}"]`);
+      if (el) selectShape(el);
+    }
     toast('画像を配置しました');
   };
-  probe.onload = () => place(probe.naturalWidth / probe.naturalHeight || 1);
+  probe.onload = () => {
+    // 高さ0(viewBox無しSVG等)だと比が Infinity になり、リサイズで箱が爆発する。有限・正のみ採用。
+    const raw = probe.naturalWidth / probe.naturalHeight;
+    place(Number.isFinite(raw) && raw > 0 ? raw : 1);
+  };
   probe.onerror = () => place(1);
   probe.src = src;
 }
@@ -910,26 +1295,21 @@ function addInlineImage(dataUrl: string, alt: string): void {
   toast('Markdown に画像を挿入しました');
 }
 
-function insertTextBox(): void {
-  const deck = parseDeck(mdInput.value);
-  const slide = deck.slides[presenter.index];
-  if (!slide) return;
-  // 追加ブロックの index = いま表示中スライドの本文ブロック数
-  const newIndex = stage.querySelectorAll('.slide-body [data-src]').length;
-  const lines = slide.bodyLines;
-  const at = lines.length ? lines[lines.length - 1]!.offset + lines[lines.length - 1]!.text.length : mdInput.value.length;
-  const before = mdInput.value.slice(0, at);
-  const text = 'テキスト';
-  mdInput.value = before + (before === '' || before.endsWith('\n') ? '\n' : '\n\n') + text + mdInput.value.slice(at);
-  persistMd();
+// 自由配置のテキストボックスを追加(overlay。Markdown には書き込まない)。
+function insertTextShape(): void {
   const o = ensureSlide(overlay, presenter.index);
-  o.blocks[newIndex] = { x: 32, y: 40, w: 36 };
-  saveOverlay(overlay);
-  rebuild(true);
-  const el = stage.querySelector<HTMLElement>(`.slide-body [data-src][data-bi="${newIndex}"]`);
+  const shape: Shape = { id: newId(), kind: 'text', text: '', x: 30, y: 42, w: 40, h: 16 };
+  o.shapes.push(shape);
+  if (!saveOverlay(overlay)) {
+    o.shapes.pop();
+    toast('保存できませんでした(容量超過の可能性)');
+    return;
+  }
+  decorateStage();
+  const el = stage.querySelector<HTMLElement>(`.ov-shape[data-sid="${shape.id}"]`);
   if (el) {
-    selectBlock(el);
-    enterEdit(el);
+    selectShape(el);
+    enterEditText(el, shape.id);
   }
 }
 
@@ -944,7 +1324,7 @@ function deleteSelection(): void {
     decorateStage();
     return;
   }
-  // ブロック: md本文から該当範囲を除去し、overlay の index を詰め直す。
+  // ブロック: md本文から該当範囲を除去する。
   const [start, e0] = rangeOf(sel.el);
   let end = e0;
   const v = mdInput.value;
@@ -952,23 +1332,20 @@ function deleteSelection(): void {
   if (v[end] === '\n') end += 1;
   mdInput.value = v.slice(0, start) + v.slice(end);
   persistMd();
-  const o = ensureSlide(overlay, presenter.index);
-  delete o.blocks[sel.index];
-  o.blocks = reindexAfterDelete(o.blocks, sel.index);
-  saveOverlay(overlay);
   deselect();
   rebuild(true);
 }
 
+// 矢印キーでの微調整は自由配置の図形のみ(ブロックはレイアウトが配置)。
 function nudge(key: string, big: boolean): void {
-  if (!sel) return;
+  if (sel?.kind !== 'shape') return;
   const step = big ? 5 : 1;
-  const b = currentBox(sel);
+  const b = currentBox(sel.id);
   if (key === 'ArrowLeft') b.x -= step;
   else if (key === 'ArrowRight') b.x += step;
   else if (key === 'ArrowUp') b.y -= step;
   else if (key === 'ArrowDown') b.y += step;
-  applyBox(clampBox(b), false);
+  applyBox(clampBox(b));
   saveOverlay(overlay);
 }
 
@@ -977,36 +1354,36 @@ insertBar.addEventListener('click', (e) => {
   const btn = (e.target as HTMLElement).closest<HTMLElement>('button[data-insert]');
   if (!btn) return;
   const what = btn.dataset.insert!;
-  if (what === 'text') insertTextBox();
+  if (what === 'text') insertTextShape();
   else if (what === 'image') openImagePicker();
   else if (what === 'delete') deleteSelection();
   else insertShape(what as VectorKind);
+  btn.blur(); // フォーカスを残すと keydown ガードが微調整/削除キーを飲み込む(挿入直後の図形を動かせない)
 });
 
 // 描画のたびに編集の見た目と選択枠を更新する(Presenter から onAfterRender 経由)。
 function decorateStage(): void {
   const enable = liveEdit && !presenting;
+  presenter.setAuthoring(enable);
   deckRoot.classList.toggle('live', enable);
   insertBar.hidden = !enable;
   const el = slideEl();
   if (el) applyOverlay(el, slideOverlay(overlay, presenter.index));
+  updateRevealUi(); // 段階表示のバッジ/ツールバー状態を更新
   if (!enable) {
     frame.hidden = true;
     return;
   }
-  // 再描画で要素が入れ替わるので、選択を index/id で取り直す。
-  if (sel?.kind === 'block') {
-    const b = stage.querySelector<HTMLElement>(`.slide-body [data-src][data-bi="${sel.index}"]`);
-    if (b) {
-      sel.el = b;
-      positionFrame();
-    } else deselect();
-  } else if (sel?.kind === 'shape') {
+  // 再描画で要素が入れ替わるので、選択を取り直す。
+  if (sel?.kind === 'shape') {
     const s = stage.querySelector<HTMLElement>(`.ov-shape[data-sid="${sel.id}"]`);
     if (s) {
       sel.el = s;
       positionFrame();
     } else deselect();
+  } else if (sel?.kind === 'block') {
+    if (sel.el.isConnected) positionFrame();
+    else deselect();
   }
 }
 
@@ -1028,29 +1405,52 @@ function setLiveEdit(on: boolean): void {
 
 // 発表(全画面)中は直接編集を止める。
 document.addEventListener('fullscreenchange', () => {
+  const wasPresenting = presenting;
   presenting = !!document.fullscreenElement || faux;
   if (presenting) {
     commitEdit();
     deselect();
+    if (!wasPresenting) presenter.resetSteps(); // 発表開始時は現在スライドを先頭ステップから
   }
   decorateStage();
 });
 
 // requestFullscreen が無い環境(iOS Safari など)向けの擬似全画面。
+// タッチ端末では Esc が無いので、抜けるための × ボタンを常に出す。
+const fauxExit = document.createElement('button');
+fauxExit.type = 'button';
+fauxExit.className = 'faux-exit';
+fauxExit.setAttribute('aria-label', '全画面を終了');
+fauxExit.textContent = '×';
+fauxExit.hidden = true;
+document.body.appendChild(fauxExit);
+
 let faux = false;
 function fauxFull(on: boolean): void {
+  const was = presenting;
   faux = on;
   document.body.classList.toggle('faux-full', on);
+  fauxExit.hidden = !on;
   presenting = on;
   if (on) {
     commitEdit();
     deselect();
+    if (!was) presenter.resetSteps(); // 発表開始時は現在スライドを先頭ステップから
   }
   decorateStage();
 }
+fauxExit.addEventListener('click', () => fauxFull(false));
 
-// 選択枠はスライドの表示サイズ変化に追従させる。
-new ResizeObserver(() => positionFrame()).observe(deckRoot);
+// 選択枠と段階表示バッジは、スライドの表示サイズ変化に追従させる(実測座標のため)。
+new ResizeObserver(() => {
+  positionFrame();
+  positionStepBadges();
+}).observe(deckRoot);
+// 入場アニメ終了後に測り直す(アニメ中の transform で位置がズレないように)。
+stage.addEventListener('animationend', () => {
+  positionFrame();
+  positionStepBadges();
+});
 
 // 移動前に編集を確定し、選択を解除してから動かす(Presenter内部のデッキを最新化)。
 function nav(action: () => void): void {
@@ -1061,7 +1461,9 @@ function nav(action: () => void): void {
 }
 
 // ── 初期化 ──
-mdInput.value = localStorage.getItem(MD_KEY) ?? SAMPLE;
+// 改行は \n に正規化。parseDeck のオフセット(段階表示/その場編集/削除/画像挿入で使う)と
+// textarea の中身を一致させ、過去に CRLF で保存された localStorage からの復元でもズレないようにする。
+mdInput.value = (lsGet(MD_KEY) ?? SAMPLE).replace(/\r\n?/g, '\n');
 setTheme(currentTheme.id, false);
 {
   const firstDeck = parseDeck(mdInput.value);
@@ -1070,22 +1472,40 @@ setTheme(currentTheme.id, false);
     setTheme(firstDeck.meta.theme, false);
   }
 }
-rebuild(false);
 {
-  const start = Number(location.hash.replace('#', '')) - 1;
+  // ディープリンクのスライド番号は rebuild の前に読む。rebuild の初回 render が onChange を
+  // 同期発火させ、hash を #1 に書き換えてしまうため(先に読まないと常に1枚目に戻る)。
+  // 先頭の数字だけ読む(新形式 #3、旧形式 #3?theme=… のどちらでも復元できる)。
+  const start = Number.parseInt(location.hash.slice(1), 10) - 1;
+  rebuild(false);
   if (Number.isFinite(start) && start > 0) presenter.go(start);
 }
 
 // ── ナビ ──
-$('next').addEventListener('click', () => nav(() => presenter.next()));
-$('prev').addEventListener('click', () => nav(() => presenter.prev()));
+$('next').addEventListener('click', () => {
+  nav(() => presenter.next());
+  $('next').blur();
+});
+$('prev').addEventListener('click', () => {
+  nav(() => presenter.prev());
+  $('prev').blur();
+});
 
 // 入力のたびに全体を再パース/再描画するのは重いので、軽くデバウンスする。
 let rebuildTimer = 0;
-mdInput.addEventListener('input', () => {
+function scheduleRebuild(): void {
   window.clearTimeout(rebuildTimer);
-  rebuildTimer = window.setTimeout(() => rebuild(true), 120);
-});
+  rebuildTimer = window.setTimeout(() => {
+    // その場編集中はスライドDOMを作り直さない(編集対象が破壊され入力が消える)。
+    // 編集が終わるまで先送りし、確定後に textarea の変更を反映する。
+    if (editingBlock) {
+      scheduleRebuild();
+      return;
+    }
+    rebuild(true);
+  }, 120);
+}
+mdInput.addEventListener('input', scheduleRebuild);
 
 // 直接編集トグル(既定はオン)。
 $('live-edit').classList.toggle('on', liveEdit);
@@ -1117,7 +1537,50 @@ $('theme-btn').addEventListener('click', () => {
   buildThemeGrid();
   toggle('theme-modal', true);
 });
-$('help-btn').addEventListener('click', () => toggle('help-overlay', true));
+// ガイドの検索フィルタを初期状態へ(全節を表示)。開き直し・目次ジャンプの前に呼ぶ。
+function resetGuideFilter(): void {
+  $<HTMLInputElement>('guide-search').value = '';
+  for (const sec of $('guide-content').querySelectorAll<HTMLElement>('.g-sec')) sec.hidden = false;
+}
+function openGuide(): void {
+  resetGuideFilter(); // 前回の検索が残って大半が隠れたまま開くのを防ぐ
+  toggle('help-overlay', true);
+}
+$('help-btn').addEventListener('click', openGuide);
+
+// ── ガイド(ヘルプ): 目次スクロール・検索・コードのコピー ──
+{
+  const guideContent = $('guide-content');
+  $('guide-nav').addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-goto]');
+    if (!b) return;
+    resetGuideFilter(); // 検索で隠れている節にも飛べるよう、まずフィルタを解除してから移動
+    document.getElementById(b.dataset.goto!)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  });
+  $<HTMLInputElement>('guide-search').addEventListener('input', (e) => {
+    const q = (e.target as HTMLInputElement).value.trim().toLowerCase();
+    for (const sec of guideContent.querySelectorAll<HTMLElement>('.g-sec')) {
+      sec.hidden = q !== '' && !(sec.textContent ?? '').toLowerCase().includes(q);
+    }
+  });
+  for (const pre of guideContent.querySelectorAll<HTMLElement>('pre.g-code')) {
+    const code = pre.textContent ?? '';
+    const btn = document.createElement('button');
+    btn.className = 'g-copy';
+    btn.type = 'button';
+    btn.textContent = 'コピー';
+    btn.addEventListener('click', () => {
+      navigator.clipboard
+        ?.writeText(code)
+        .then(() => {
+          btn.textContent = 'コピーしました';
+          window.setTimeout(() => (btn.textContent = 'コピー'), 1200);
+        })
+        .catch(() => {});
+    });
+    pre.appendChild(btn);
+  }
+}
 $('load-sample').addEventListener('click', () => {
   mdInput.value = SAMPLE;
   rebuild(false);
@@ -1160,6 +1623,7 @@ exportMenu.querySelectorAll<HTMLButtonElement>('[data-export]').forEach((btn) =>
 });
 
 async function runExport(kind: string): Promise<void> {
+  commitEdit(); // 進行中の編集(本文/テキスト箱)を確定してから書き出す(古い内容で出力しない)
   const deck = parseDeck(mdInput.value);
   if (deck.slides.length === 0) {
     toast('スライドがありません');
@@ -1209,10 +1673,14 @@ async function runExport(kind: string): Promise<void> {
 }
 
 function doPrint(): void {
+  commitEdit(); // 進行中の編集(本文/テキスト箱)を確定してから出力(古い内容で印刷しない)
   const deck = parseDeck(mdInput.value);
-  $('print-deck').innerHTML = deck.slides
-    .map((s) => `<div class="print-page">${slideHtml(s)}</div>`)
-    .join('');
+  const host = $('print-deck');
+  host.innerHTML = deck.slides.map((s) => `<div class="print-page">${slideHtml(s)}</div>`).join('');
+  // 自由配置(テキスト/図形/画像)も印刷に反映する。
+  host.querySelectorAll<HTMLElement>('.print-page > .slide').forEach((el, i) => {
+    applyOverlay(el, slideOverlay(overlay, i));
+  });
   window.print();
 }
 
@@ -1264,7 +1732,9 @@ $<HTMLInputElement>('file').addEventListener('change', (e) => {
   if (file) void loadFile(file);
 });
 async function loadFile(file: File): Promise<void> {
-  mdInput.value = await file.text();
+  // 改行を \n に正規化。parseDeck は正規化後のオフセットを返すので、ここで揃えておかないと
+  // CRLF ファイルで段階表示/その場編集/削除のスライス位置がずれて文書が壊れる。
+  mdInput.value = (await file.text()).replace(/\r\n?/g, '\n');
   rebuild(false);
   toast(`${file.name} を読み込みました`);
 }
@@ -1331,6 +1801,7 @@ function flash(btn: HTMLElement): void {
 
 // ── 一覧 ──
 function buildOverview(): void {
+  commitEdit(); // 進行中の編集を確定してからサムネイル化(古い/プレースホルダ表示を防ぐ)
   const deck = parseDeck(mdInput.value);
   const grid = $('overview-grid');
   grid.innerHTML = '';
@@ -1339,6 +1810,8 @@ function buildOverview(): void {
     cell.className = 'ov-cell';
     cell.style.setProperty('--i', String(i));
     cell.innerHTML = `<div class="ov-thumb">${slideHtml(s)}</div><span class="ov-no">${i + 1}</span>`;
+    const thumbSlide = cell.querySelector<HTMLElement>('.ov-thumb > .slide');
+    if (thumbSlide) applyOverlay(thumbSlide, slideOverlay(overlay, i)); // 自由配置(テキスト/図形/画像)も一覧に出す
     cell.addEventListener('click', () => {
       nav(() => presenter.go(i));
       toggle('overview-overlay', false);
@@ -1390,61 +1863,112 @@ $('timer-toggle').addEventListener('click', () => {
     }, 1000);
     btn.textContent = '停止';
   }
+  btn.blur(); // フォーカスを残すと keydown ガードが矢印/スペースを飲み込み、発表中にスライドを送れなくなる
 });
 $('timer-reset').addEventListener('click', () => {
   elapsed = 0;
   $('timer').textContent = '00:00';
+  $('timer-reset').blur();
 });
 
 // ── キーボード ──
+const anyOverlayOpen = (): boolean =>
+  !$('overview-overlay').hidden ||
+  !$('theme-modal').hidden ||
+  !$('help-overlay').hidden ||
+  !$('gslides-modal').hidden ||
+  !$('export-menu').hidden;
+
 window.addEventListener('keydown', (ev) => {
-  const target = ev.target as HTMLElement;
-  if (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT' || target.isContentEditable) return;
+  const target = ev.target as HTMLElement | null;
+  // Esc は検索欄など入力中でも、開いているオーバーレイを閉じられるよう最優先で処理する。
+  if (ev.key === 'Escape' && anyOverlayOpen()) {
+    ['overview-overlay', 'theme-modal', 'help-overlay', 'gslides-modal'].forEach((id) => toggle(id, false));
+    $('export-menu').hidden = true;
+    target?.blur();
+    return;
+  }
+  // テキスト入力中・対話的コントロールにフォーカスがあるときは横取りしない
+  // (ボタンの Space/Enter による二重発火を防ぐ)。
+  if (target?.closest('input, textarea, select, a[href], button, [contenteditable=""], [contenteditable="true"]')) {
+    return;
+  }
   if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
-  // 選択中の図形/ブロックの操作(削除・微調整・選択解除)を移動より優先する。
+
+  // Escape(オーバーレイが無いとき): 全画面を抜ける → 選択解除。
+  if (ev.key === 'Escape') {
+    if (faux) fauxFull(false);
+    else if (sel) deselect();
+    return;
+  }
+
+  // オーバーレイ(一覧/テーマ/ヘルプ/Google/書き出しメニュー)を開いている間は、
+  // 裏のデッキへナビ・編集系ショートカットを通さない(モーダル越しの誤操作を防ぐ。Esc は上で処理済み)。
+  if (anyOverlayOpen()) return;
+
+  // 選択中の削除・微調整(編集中でないとき)。
   if (liveEdit && !presenting && sel && !editingBlock) {
     if (ev.key === 'Delete' || ev.key === 'Backspace') {
       ev.preventDefault();
       deleteSelection();
       return;
     }
-    if (ev.key === 'Escape') {
-      deselect();
-      return;
-    }
-    if (ev.key.startsWith('Arrow')) {
-      ev.preventDefault();
-      nudge(ev.key, ev.shiftKey);
-      return;
+    // 矢印での微調整・レター抑止は「自由配置の図形」選択時だけ。本文ブロック選択中は
+    // 矢印=スライド移動・レター=ショートカットをそのまま通す(選択中にナビが死なないように)。
+    if (sel.kind === 'shape') {
+      if (ev.key.startsWith('Arrow')) {
+        ev.preventDefault();
+        nudge(ev.key, ev.shiftKey);
+        return;
+      }
+      if (/^[a-zA-Z?]$/.test(ev.key)) return; // 図形選択中はレターのショートカットを誤発火させない
     }
   }
+
+  // ナビゲーション・ヘルプ(常時有効)。
   switch (ev.key) {
     case 'ArrowRight':
     case ' ':
       ev.preventDefault();
       nav(() => presenter.next());
-      break;
+      return;
     case 'ArrowLeft':
+      ev.preventDefault();
       nav(() => presenter.prev());
-      break;
+      return;
     case 'Home':
       nav(() => presenter.go(0));
-      break;
+      return;
     case 'End':
       nav(() => presenter.go(presenter.total - 1));
-      break;
+      return;
+    case 'Backspace':
+      ev.preventDefault(); // 入力欄外の Backspace で「戻る」が起きないように
+      return;
+    case '?':
+      openGuide();
+      return;
+  }
+
+  // 全画面・一覧・発表者ノートは発表中でも使う(全画面の抜け・スライドの飛び先選び・手元メモ)。
+  switch (ev.key) {
     case 'f':
     case 'F':
       $('present').click();
-      break;
+      return;
     case 'o':
     case 'O':
       $('overview').click();
-      break;
+      return;
     case 's':
     case 'S':
       toggle('notes-panel');
-      break;
+      return;
+  }
+
+  // 以下のオーサリング系(編集パネル・テーマ・書き出し)は発表中は止める(発表の邪魔をしない)。
+  if (presenting) return;
+  switch (ev.key) {
     case 'e':
     case 'E':
       toggle('editor');
@@ -1457,39 +1981,25 @@ window.addEventListener('keydown', (ev) => {
     case 'P':
       $('export').click();
       break;
-    case '?':
-      toggle('help-overlay', true);
-      break;
-    case 'Escape':
-      if (faux) fauxFull(false);
-      ['overview-overlay', 'theme-modal', 'help-overlay', 'gslides-modal'].forEach((id) =>
-        toggle(id, false),
-      );
-      $('export-menu').hidden = true;
-      break;
   }
 });
 
-// スワイプ。横移動が主のときだけ移動し、編集中のブロック/図形上では無効にする
-// (ドラッグ操作と衝突しないように)。
+// スワイプ。横移動が主で、図形のドラッグが起きていないときだけスライドを移動する。
 let touchX = 0;
 let touchY = 0;
-let touchEditable = false;
 deckRoot.addEventListener(
   'touchstart',
   (e) => {
     touchX = e.changedTouches[0]!.clientX;
     touchY = e.changedTouches[0]!.clientY;
-    const t = e.target as HTMLElement;
-    touchEditable =
-      liveEdit && !presenting && !!(t.closest('[data-src]') || t.closest('.ov-shape') || t.closest('.sel-h'));
+    draggedThisGesture = false;
   },
   { passive: true },
 );
 deckRoot.addEventListener(
   'touchend',
   (e) => {
-    if (touchEditable) return;
+    if (draggedThisGesture) return; // 図形を動かしたジェスチャは移動にしない
     const dx = e.changedTouches[0]!.clientX - touchX;
     const dy = e.changedTouches[0]!.clientY - touchY;
     if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy) * 1.4) return;

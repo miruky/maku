@@ -59,4 +59,34 @@ describe('Presenter 段階表示', () => {
     p.next();
     expect(p.index).toBe(1);
   });
+
+  it('編集中(authoring)は段階を刻まず next で直接次スライドへ', () => {
+    // 回帰防止: 編集中は全ブロックが見えているのに、next が見えないステップを空送りしていた。
+    const { p, visible } = setup('<!-- incremental -->\n# A\n\nB\n\nC\n\n---\n\n# slide2');
+    p.setAuthoring(true);
+    expect(visible()).toBe(3); // 編集中は全部見えている
+    p.next();
+    expect(p.index).toBe(1); // 段階を踏まずにスライドが進む
+  });
+
+  it('authoring を抜けると step が先頭へ戻る(置き去りで途中状態から始まらない)', () => {
+    // 回帰防止: 編集中に進めた step が残り、発表へ戻ったスライドが全表示で始まっていた。
+    const { p, visible } = setup('<!-- incremental -->\n# A\n\nB\n\nC');
+    p.next();
+    p.next();
+    expect(visible()).toBe(3); // step を最後まで進めた
+    p.setAuthoring(true);
+    p.setAuthoring(false); // 発表へ復帰 → step は先頭へ
+    expect(visible()).toBe(1);
+  });
+
+  it('resetSteps で現在スライドが先頭ステップへ戻る(発表開始時)', () => {
+    // 回帰防止: 閲覧中に → で進めた状態のまま発表を始めると途中表示で開いていた。
+    const { p, visible } = setup('<!-- incremental -->\n# A\n\nB\n\nC');
+    p.next();
+    p.next();
+    expect(visible()).toBe(3);
+    p.resetSteps();
+    expect(visible()).toBe(1);
+  });
 });

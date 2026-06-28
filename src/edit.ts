@@ -10,6 +10,8 @@ export function inlineToMd(node: Node): string {
   if (node.nodeType === TEXT) return node.textContent ?? '';
   if (node.nodeType !== ELEMENT) return '';
   const el = node as Element;
+  // 段階表示の番号バッジなど、本文ではないオーバーレイ用要素は無視する(誤って直列化しない)。
+  if (el.classList.contains('step-badge')) return '';
   const kids = (): string => Array.from(el.childNodes).map(inlineToMd).join('');
   switch (el.tagName) {
     case 'BR':
@@ -131,6 +133,8 @@ function tableToMd(table: Element): string {
 function preToMd(pre: Element): string {
   const lang = pre.getAttribute('data-lang') ?? '';
   const code = pre.querySelector('code');
-  const text = code?.textContent ?? '';
+  // textContent だと contenteditable が改行に入れる <div>/<br> が潰れて行が連結してしまう。
+  // inlineToMd は BR/DIV/P を改行へ写すので、それで本来の改行を保つ。
+  const text = code ? Array.from(code.childNodes).map(inlineToMd).join('') : '';
   return '```' + lang + '\n' + text.replace(/\n$/, '') + '\n```';
 }

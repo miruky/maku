@@ -1,13 +1,13 @@
-// スライド上の「自由配置・図形」を扱うオーバーレイ層。
-// PowerPoint のように、ブロックの位置変更や図形の挿入を Markdown とは別に保持する。
-// 方針:
-// - 位置/サイズ・図形は localStorage に保存し、Markdown 本文は汚さない(文字内容だけが md)。
-// - 座標はスライドに対する百分率(0–100)。16:9 のどの表示サイズでも崩れない。
-// - ブロックは描画順の index で識別する(文字編集では不変、構成変更には弱いが実用的)。
+// スライド上の「自由配置レイヤ」を扱うオーバーレイ層。
+// 方針(改訂):
+// - Markdown 本文のブロックはレイアウトが配置する(自由移動はしない)。その場のテキスト編集だけ可能。
+// - 「自由配置」したいものは、このオーバーレイ層に置く: テキストボックス・図形・画像。
+//   これらは安定した id で識別し、座標はスライドに対する百分率(0–100)で持つ。
+// - オーバーレイは localStorage に保存し、Markdown 本文は汚さない。
+// - 以前の「Markdown ブロックを index で自由配置する」しくみ(壊れやすかった)は廃止した。
 
-// 図形の種類。vector は SVG で描く図形、image は src/alt を持つ自由配置の画像。
 export type VectorKind = 'rect' | 'ellipse' | 'triangle' | 'line' | 'arrow';
-export type ShapeKind = VectorKind | 'image';
+export type ShapeKind = VectorKind | 'image' | 'text';
 
 export interface Box {
   x: number; // 左上X(%)
@@ -28,30 +28,29 @@ export interface ImageShape extends ShapeBase {
   alt: string; // 代替テキスト
   ar?: number; // 取り込み時の縦横比 w/h(アスペクト固定リサイズ用)
 }
-export type Shape = VectorShape | ImageShape;
+export interface TextShape extends ShapeBase {
+  kind: 'text';
+  text: string; // プレーンテキスト(改行可)
+}
+export type Shape = VectorShape | ImageShape | TextShape;
 
 export function isImageShape(s: Shape): s is ImageShape {
   return s.kind === 'image';
 }
-
-// md ブロックの位置上書き。高さは内容なりなので任意。
-export interface BlockBox {
-  x: number;
-  y: number;
-  w: number;
-  h?: number;
+export function isTextShape(s: Shape): s is TextShape {
+  return s.kind === 'text';
 }
 
 export interface SlideOverlay {
-  blocks: Record<number, BlockBox>; // ブロックindex → 位置
   shapes: Shape[];
 }
 
 export type Overlay = Record<number, SlideOverlay>; // スライドindex → オーバーレイ
 
-const KEY = 'maku.overlay';
+const KEY = 'maku.overlay2'; // 旧 index ベースのデータと混ざらないよう鍵を変える
 
-const SHAPE_KINDS: ShapeKind[] = ['rect', 'ellipse', 'triangle', 'line', 'arrow', 'image'];
+const VECTOR_KINDS: VectorKind[] = ['rect', 'ellipse', 'triangle', 'line', 'arrow'];
+const SHAPE_KINDS: ShapeKind[] = [...VECTOR_KINDS, 'image', 'text'];
 const finite = (v: unknown, fallback = 0): number =>
   typeof v === 'number' && Number.isFinite(v) ? v : fallback;
 
@@ -63,27 +62,20 @@ export function sanitizeOverlay(input: unknown): Overlay {
   for (const [k, v] of Object.entries(input as Record<string, unknown>)) {
     const i = Number(k);
     if (!Number.isInteger(i) || i < 0 || !v || typeof v !== 'object') continue;
-    const slide = v as { blocks?: unknown; shapes?: unknown };
-    const blocks: Record<number, BlockBox> = {};
-    if (slide.blocks && typeof slide.blocks === 'object') {
-      for (const [bk, bv] of Object.entries(slide.blocks as Record<string, unknown>)) {
-        const bi = Number(bk);
-        if (!Number.isInteger(bi) || bi < 0 || !bv || typeof bv !== 'object') continue;
-        const b = bv as Record<string, unknown>;
-        const hasH = typeof b.h === 'number' && Number.isFinite(b.h);
-        const c = clampBox({ x: finite(b.x), y: finite(b.y), w: finite(b.w, 10), h: hasH ? (b.h as number) : 10 });
-        const box: BlockBox = { x: c.x, y: c.y, w: c.w };
-        if (hasH) box.h = c.h;
-        blocks[bi] = box;
-      }
-    }
+    const slide = v as { shapes?: unknown };
     const shapes: Shape[] = [];
     if (Array.isArray(slide.shapes)) {
       for (const sv of slide.shapes) {
         if (!sv || typeof sv !== 'object') continue;
         const sh = sv as Record<string, unknown>;
         if (typeof sh.id !== 'string' || !SHAPE_KINDS.includes(sh.kind as ShapeKind)) continue;
-        const base = clampBox({ id: sh.id, x: finite(sh.x), y: finite(sh.y), w: finite(sh.w, 10), h: finite(sh.h, 10) });
+        const base = clampBox({
+          id: sh.id,
+          x: finite(sh.x),
+          y: finite(sh.y),
+          w: finite(sh.w, 10),
+          h: finite(sh.h, 10),
+        });
         if (sh.kind === 'image') {
           const src = typeof sh.src === 'string' && /^(https?:|data:)/.test(sh.src) ? sh.src : '';
           shapes.push({
@@ -93,12 +85,14 @@ export function sanitizeOverlay(input: unknown): Overlay {
             alt: typeof sh.alt === 'string' ? sh.alt : '',
             ...(typeof sh.ar === 'number' && Number.isFinite(sh.ar) && sh.ar > 0 ? { ar: sh.ar } : {}),
           });
+        } else if (sh.kind === 'text') {
+          shapes.push({ ...base, kind: 'text', text: typeof sh.text === 'string' ? sh.text : '' });
         } else {
           shapes.push({ ...base, kind: sh.kind as VectorKind });
         }
       }
     }
-    out[i] = { blocks, shapes };
+    out[i] = { shapes };
   }
   return out;
 }
@@ -124,13 +118,12 @@ export function saveOverlay(o: Overlay): boolean {
 
 export function slideOverlay(o: Overlay, slide: number): SlideOverlay {
   const s = o[slide];
-  return s ? { blocks: s.blocks ?? {}, shapes: s.shapes ?? [] } : { blocks: {}, shapes: [] };
+  return s ? { shapes: s.shapes ?? [] } : { shapes: [] };
 }
 
 export function ensureSlide(o: Overlay, slide: number): SlideOverlay {
-  if (!o[slide]) o[slide] = { blocks: {}, shapes: [] };
+  if (!o[slide]) o[slide] = { shapes: [] };
   const s = o[slide];
-  if (!s.blocks) s.blocks = {};
   if (!s.shapes) s.shapes = [];
   return s;
 }
@@ -148,15 +141,32 @@ export function clampBox<T extends Box>(b: T): T {
   return { ...b, w, h, x: clamp(b.x, 0, 100 - w), y: clamp(b.y, 0, 100 - h) };
 }
 
-// ブロック削除時、index をキーにしたマップを詰め直す(削除位置より後ろを1つ前へ)。
-export function reindexAfterDelete(blocks: Record<number, BlockBox>, removed: number): Record<number, BlockBox> {
-  const out: Record<number, BlockBox> = {};
-  for (const k of Object.keys(blocks)) {
-    const i = Number(k);
-    if (i < removed) out[i] = blocks[i]!;
-    else if (i > removed) out[i - 1] = blocks[i]!;
-  }
-  return out;
+// 箱を縦横比を保ったままスライド内に収める(画像のアスペクト固定リサイズ用)。
+// はみ出すときは「掴んでいる端(anchor)」を固定したまま両辺を同じ率で縮める。
+export function fitBoxKeepingAspect(b: Box, anchorX: 'l' | 'r' | 'c', anchorY: 't' | 'b' | 'c'): Box {
+  let { x, y, w, h } = b;
+  const right = x + w;
+  const bottom = y + h;
+  // 反対の端をまたいで潰れた箱(w/h <= 0)でも倍率が Infinity/NaN にならないよう、先に正の最小値へ。
+  w = Math.max(w, 0.01);
+  h = Math.max(h, 0.01);
+  // 最小・最大に対する倍率を求め、両辺へ同率で適用。
+  let scale = 1;
+  if (w > 100) scale = Math.min(scale, 100 / w);
+  if (h > 100) scale = Math.min(scale, 100 / h);
+  if (w < 3) scale = Math.max(scale, 3 / w);
+  if (h < 3) scale = Math.max(scale, 3 / h);
+  w *= scale;
+  h *= scale;
+  // anchor を固定して再配置。
+  if (anchorX === 'r') x = right - w;
+  else if (anchorX === 'c') x = b.x + b.w / 2 - w / 2;
+  if (anchorY === 'b') y = bottom - h;
+  else if (anchorY === 'c') y = b.y + b.h / 2 - h / 2;
+  // 最後にスライド内へ平行移動(サイズは変えない)。
+  x = clamp(x, 0, 100 - w);
+  y = clamp(y, 0, 100 - h);
+  return { ...b, x, y, w, h };
 }
 
 // 図形1つの内側SVG。viewBox を 0..100 に取り、preserveAspectRatio=none で箱に引き伸ばす。
@@ -189,60 +199,53 @@ export function shapeInnerSvg(kind: VectorKind): string {
 }
 
 export function shapeLabel(kind: ShapeKind): string {
-  return { rect: '四角形', ellipse: '円・楕円', triangle: '三角形', line: '直線', arrow: '矢印', image: '画像' }[
-    kind
-  ];
+  return {
+    rect: '四角形',
+    ellipse: '円・楕円',
+    triangle: '三角形',
+    line: '直線',
+    arrow: '矢印',
+    image: '画像',
+    text: 'テキスト',
+  }[kind];
 }
 
-// 描画済みスライド要素にオーバーレイを反映する。
-// - ブロック(data-src)に index(data-bi)を振り、位置指定があれば絶対配置にする。
-// - 図形は専用レイヤ(.ov-shapes)へ描く。
+// 描画済みスライド要素に、自由配置のオーバーレイ(図形・画像・テキスト)を専用レイヤへ描く。
 export function applyOverlay(slideEl: Element, ov: SlideOverlay): void {
-  const blocks = Array.from(slideEl.querySelectorAll<HTMLElement>('.slide-body [data-src]'));
-  blocks.forEach((b, i) => {
-    b.dataset.bi = String(i);
-    const pos = ov.blocks[i];
-    if (pos) {
-      b.style.position = 'absolute';
-      b.style.left = `${pos.x}%`;
-      b.style.top = `${pos.y}%`;
-      b.style.width = `${pos.w}%`;
-      b.style.height = pos.h != null ? `${pos.h}%` : '';
-      b.style.maxWidth = 'none';
-      b.classList.add('ov-placed');
-    } else {
-      b.style.position = '';
-      b.style.left = '';
-      b.style.top = '';
-      b.style.width = '';
-      b.style.height = '';
-      b.style.maxWidth = '';
-      b.classList.remove('ov-placed');
-    }
-  });
-
   let layer = slideEl.querySelector<HTMLElement>('.ov-shapes');
   if (!layer) {
     layer = document.createElement('div');
     layer.className = 'ov-shapes';
     slideEl.appendChild(layer);
   }
-  layer.innerHTML = ov.shapes
-    .map((s) => {
-      const pos = `left:${s.x}%;top:${s.y}%;width:${s.w}%;height:${s.h}%`;
-      if (s.kind === 'image') {
-        const safe = /^(https?:|data:)/.test(s.src) ? s.src : '';
-        return (
-          `<div class="ov-shape ov-shape-image" data-sid="${attrEsc(s.id)}" style="${pos}">` +
-          `<img src="${attrEsc(safe)}" alt="${attrEsc(s.alt)}" draggable="false" /></div>`
-        );
-      }
-      return `<div class="ov-shape ov-shape-${s.kind}" data-sid="${attrEsc(s.id)}" style="${pos}">${shapeInnerSvg(s.kind)}</div>`;
-    })
-    .join('');
+  layer.innerHTML = ov.shapes.map(shapeHtml).join('');
 }
 
-// 属性値エスケープ。src/alt/id を style/属性から脱出させない。
+function shapeHtml(s: Shape): string {
+  const pos = `left:${s.x}%;top:${s.y}%;width:${s.w}%;height:${s.h}%`;
+  if (s.kind === 'image') {
+    const safe = /^(https?:|data:)/.test(s.src) ? s.src : '';
+    return (
+      `<div class="ov-shape ov-shape-image" data-sid="${attrEsc(s.id)}" style="${pos}">` +
+      `<img src="${attrEsc(safe)}" alt="${attrEsc(s.alt)}" draggable="false" /></div>`
+    );
+  }
+  if (s.kind === 'text') {
+    return (
+      `<div class="ov-shape ov-shape-text" data-sid="${attrEsc(s.id)}" style="${pos}">` +
+      `<div class="ov-text">${textHtml(s.text)}</div></div>`
+    );
+  }
+  return `<div class="ov-shape ov-shape-${s.kind}" data-sid="${attrEsc(s.id)}" style="${pos}">${shapeInnerSvg(s.kind)}</div>`;
+}
+
+// テキストはエスケープし、改行を <br> に。空なら淡いプレースホルダを出す。
+function textHtml(text: string): string {
+  if (text.trim() === '') return '<span class="ov-text-ph">テキスト</span>';
+  return attrEsc(text).replace(/\n/g, '<br />');
+}
+
+// 属性値・本文エスケープ。src/alt/id/text を style/属性/HTMLから脱出させない。
 function attrEsc(v: string): string {
   return v.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
