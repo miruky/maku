@@ -130,4 +130,40 @@ describe('render', () => {
     expect(html).toContain("background-image:url('https://e.com/a.jpg')");
     expect(html).not.toContain('<img'); // 媒体は figure 背景。本文側にインライン画像を残さない
   });
+
+  it('stats: === が無くても #### で複数指標に分かれる', () => {
+    const html = slideHtml(slide('<!-- layout: stats -->\n#### A\n10%\n\n#### B\n20%\n\n#### C\n30%'));
+    expect((html.match(/class="stat"/g) ?? []).length).toBe(3);
+    expect(html).toContain('10');
+    expect(html).toContain('30');
+  });
+
+  it('compare: 片側だけのとき空セルに data-step を付けない', () => {
+    const html = slideHtmlMapped(slide('<!-- layout: compare -->\n<!-- incremental -->\nA だけ'));
+    expect((html.match(/data-step=/g) ?? []).length).toBe(1);
+  });
+
+  it('image分割: 画像が無ければ列を捨てず全部本文にする', () => {
+    const html = slideHtml(slide('<!-- layout: image-left -->\n左テキスト\n===\n右テキスト'));
+    expect(html).toContain('左テキスト');
+    expect(html).toContain('右テキスト');
+    expect(html).toContain('media-fig empty');
+  });
+
+  it('timeline: 単独行の === を本文に出さない', () => {
+    const html = slideHtml(slide('<!-- layout: timeline -->\n# 沿革\n\n- 2019 開始\n===\n- 2021 公開'));
+    expect(html).not.toContain('<p>===</p>');
+    expect((html.match(/tl-event/g) ?? []).length).toBe(2);
+  });
+
+  it('split: === が無い incremental はブロック単位で段階表示する', () => {
+    const html = slideHtmlMapped(slide('<!-- layout: split -->\n<!-- incremental -->\nA\n\nB\n\nC'));
+    expect((html.match(/data-step=/g) ?? []).length).toBe(3);
+  });
+
+  it('split: === 付き(空セルで1列化)incremental でも生の === を本文に漏らさない', () => {
+    const html = slideHtmlMapped(slide('<!-- layout: split -->\n<!-- incremental -->\nA\n\nB\n==='));
+    expect(html).not.toContain('===');
+    expect(html).not.toContain('<p>=</p>');
+  });
 });

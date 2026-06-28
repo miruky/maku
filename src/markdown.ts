@@ -41,7 +41,10 @@ export function inline(text: string): string {
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
     .replace(/~~([^~]+)~~/g, '<del>$1</del>')
     .replace(/(^|[^*])\*([^*\s][^*]*)\*/g, '$1<em>$2</em>')
-    .replace(/(^|[^_])_([^_\s][^_]*)_/g, '$1<em>$2</em>');
+    // _ の強調は語中では無効(CommonMark)。開き _ の直前が語構成文字でなく、閉じ _ の直後も
+    // 語構成文字でないときだけ強調にする。語の判定は Unicode 文字・数字(\p{L}\p{N})で行い、
+    // ASCII の snake_case/URL だけでなく日本語(機能_詳細_)の語中アンダースコアも斜体化しない。
+    .replace(/(^|[^\p{L}\p{N}_])_([^_\s][^_]*?)_(?![\p{L}\p{N}])/gu, '$1<em>$2</em>');
   for (let k = 0; k < 5 && s.includes('\uE000'); k += 1) {
     s = s.replace(/\uE000(\d+)\uE000/g, (m, i: string) => stash[Number(i)] ?? m);
   }

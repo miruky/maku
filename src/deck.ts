@@ -60,6 +60,9 @@ export interface Slide {
   incremental: boolean;
   reveal: RevealMode;
   steps: SlideStep[] | null; // トップレベルブロックごとのステップ(DOM順)
+  // このスライドの原文中の範囲(GUIからディレクティブを書き換えるのに使う)。
+  srcStart: number;
+  srcEnd: number;
   // 本文を構成する行(ディレクティブ・ノートを除く)を、絶対オフセット付きで保持する。
   bodyLines: SourceLine[];
   // split のとき、各段の本文行。
@@ -106,6 +109,41 @@ const COLUMN_LAYOUTS: Layout[] = [
 // それ以外(quote/section/image-*)は段階表示を行わない。
 const FLOW_LAYOUTS: Layout[] = ['default', 'center', 'title', 'full'];
 const ITEM_LAYOUTS: Layout[] = ['split', 'grid', 'cards', 'stats', 'compare', 'timeline'];
+// 専用の単一列デザインを持たない段組系。セルが1つなら本文フロー扱いにしてブロック単位で段階表示する
+// (stats/cards/compare/timeline は単一列でも固有レイアウトを保つため含めない)。
+const FLOW_FALLBACK_LAYOUTS: Layout[] = ['split', 'grid'];
+
+// 1行ずつ与えると「その行がコードフェンスに保護されているか(フェンス区切り行自体、または開いた
+// フェンスの内側)」を返す判定器を作る。CommonMark に倣い、開いたフェンスは同じ文字種・開始以上の
+// 長さの行でのみ閉じる。スライド分割・ディレクティブ解析・GUI のディレクティブ除去で同じ規則を共有し、
+// 「コード例の中の --- や <!-- ... --> を区切り/指示と誤解しない」挙動を一致させる。
+function fenceScanner(): (text: string) => boolean {
+  const re = /^[ \t]*(`{3,}|~{3,})/;
+  let open: { ch: string; len: number } | null = null;
+  return (text) => {
+    const m = text.match(re);
+    if (m) {
+      const ch = m[1]![0]!;
+      const len = m[1]!.length;
+      if (!open) open = { ch, len };
+      else if (open.ch === ch && len >= open.len) open = null;
+      return true; // フェンス区切り行は本文として扱う(指示・区切りにしない)
+    }
+    return open !== null;
+  };
+}
+
+// スライド本文から reveal / incremental / fragment の「ディレクティブ行」だけを取り除く。
+// コードフェンスの内側にある例示は本文なので残す。reveal はコロン前後の空白を許容(parseDeck と一致)。
+// GUI で段階表示モードを切り替えるときに使い、利用者が書いたドキュメントを誤って消さないための処理。
+export function stripRevealDirectiveLines(region: string): string {
+  const dirRe = /^[ \t]*<!--[ \t]*(?:incremental|fragment|reveal[ \t]*:.*?)[ \t]*-->[ \t]*$/i;
+  const protectedLine = fenceScanner();
+  return region
+    .split('\n')
+    .filter((line) => protectedLine(line) || !dirRe.test(line)) // フェンス外の directive 行だけ除去
+    .join('\n');
+}
 
 export function parseDeck(source: string): Deck {
   const text = source.replace(/\r\n?/g, '\n');
@@ -155,8 +193,9 @@ function extractFrontmatter(all: SourceLine[]): {
 function splitSlides(body: SourceLine[]): SourceLine[][] {
   const out: SourceLine[][] = [];
   let buf: SourceLine[] = [];
+  const protectedLine = fenceScanner(); // コードフェンス内の --- では分割しない(幻のスライド/原文破壊を防ぐ)
   for (const ln of body) {
-    if (/^\s*---\s*$/.test(ln.text)) {
+    if (!protectedLine(ln.text) && /^\s*---\s*$/.test(ln.text)) {
       out.push(buf);
       buf = [];
     } else {
@@ -176,9 +215,10 @@ function parseSlide(raw: SourceLine[]): Slide {
   // 単独行マーカー(<!-- key --> など)は、次に来る本文ブロックに紐づける。
   const markerAt = new Map<number, Marker>();
   let pending: Marker | null = null;
+  const protectedLine = fenceScanner(); // コードフェンス内の <!-- ... --> は本文(指示として解釈しない)
 
   for (const ln of raw) {
-    const directive = /^\s*<!--\s*(.+?)\s*-->\s*$/.exec(ln.text);
+    const directive = protectedLine(ln.text) ? null : /^\s*<!--\s*(.+?)\s*-->\s*$/.exec(ln.text);
     if (directive) {
       const mk = parseMarker(directive[1]!);
       if (mk) {
@@ -202,7 +242,18 @@ function parseSlide(raw: SourceLine[]): Slide {
 
   let bodyLines = kept;
   let notes = '';
-  const noteIdx = kept.findIndex((l) => /^\s*\?\?\?\s*$/.test(l.text));
+  // ??? もコードフェンスの外側だけをノート開始とみなす(コード例の ??? で本文を切らない)。
+  let noteIdx = -1;
+  {
+    const protectedLine = fenceScanner();
+    for (let i = 0; i < kept.length; i += 1) {
+      const prot = protectedLine(kept[i]!.text);
+      if (!prot && /^\s*\?\?\?\s*$/.test(kept[i]!.text)) {
+        noteIdx = i;
+        break;
+      }
+    }
+  }
   if (noteIdx !== -1) {
     bodyLines = kept.slice(0, noteIdx);
     notes = kept
@@ -210,6 +261,9 @@ function parseSlide(raw: SourceLine[]): Slide {
       .map((l) => l.text)
       .join('\n')
       .trim();
+    // ??? 以降(ノート領域)に書かれた key/step/group/pin マーカーは本文に適用しない。
+    // 残すと computeSteps が範囲外マーカーを最終本文ブロックへ畳み込み、誤って pin/key が付く。
+    for (const k of [...markerAt.keys()]) if (k >= noteIdx) markerAt.delete(k);
   }
 
   let columns: string[] | null = null;
@@ -217,8 +271,9 @@ function parseSlide(raw: SourceLine[]): Slide {
   if (COLUMN_LAYOUTS.includes(layout as Layout)) {
     const groups: SourceLine[][] = [];
     let cur: SourceLine[] = [];
+    const protectedLine = fenceScanner(); // コードフェンス内の === では段を割らない(コードブロックを壊さない)
     for (const l of bodyLines) {
-      if (/^\s*===\s*$/.test(l.text)) {
+      if (!protectedLine(l.text) && /^\s*===\s*$/.test(l.text)) {
         groups.push(cur);
         cur = [];
       } else {
@@ -243,15 +298,44 @@ function parseSlide(raw: SourceLine[]): Slide {
     .map((l) => l.text)
     .join('\n')
     .trim();
-  // フロー層はマーカーでブロックにステップを割る。アイテム層は render がセルに
-  // data-step を付けるので steps は持たない。対象外のレイアウトでは段階表示を切る。
-  let outReveal = reveal;
+  // 段階表示の振り分け:
+  // - フロー層、または「===で割れていない split/grid(セルが1つ)」はブロック単位でステップ(マーカー対応)。
+  // - それ以外の段組系(stats/cards/compare/timeline)はレイアウトを保ったまま render が data-step を付与。
+  //   ※ ここで columns を null にするとレイアウト自体が壊れる(stats の大数字等が消える)ので決して落とさない。
+  // - 複数セルの段組系もセル順に表示。key-first は順次に落とす。
+  // - quote/section/image-* は段階表示なし。
+  let outReveal: RevealMode = reveal;
   let steps: SlideStep[] | null = null;
   if (reveal !== 'none') {
-    if (FLOW_LAYOUTS.includes(layout)) steps = computeSteps(bodyLines, markerAt, reveal);
-    else if (!ITEM_LAYOUTS.includes(layout)) outReveal = 'none';
+    const isFlow = FLOW_LAYOUTS.includes(layout);
+    const isItem = ITEM_LAYOUTS.includes(layout);
+    const singleCol = !columnLines || columnLines.length <= 1;
+    // body に === 区切りがあるか(空セルが除かれて1列になっていても、元は段組指定)。
+    const hasSep = ((): boolean => {
+      // === 区切りの有無もフェンス対応で判定(コード内の === で誤って段組扱いにしない)。
+      const protectedLine = fenceScanner();
+      for (const l of bodyLines) if (!protectedLine(l.text) && /^\s*===\s*$/.test(l.text)) return true;
+      return false;
+    })();
+    // 専用の単一列デザインを持たない split/grid を、かつ === を書いていないときだけフロー描画へ。
+    // === を書いた段組はたとえ1列でも段組のまま描く(フローに落とすと === が本文に漏れる)。
+    const flowFallback = FLOW_FALLBACK_LAYOUTS.includes(layout) && singleCol && !hasSep;
+    if (isFlow || flowFallback) {
+      if (flowFallback) {
+        columns = null;
+        columnLines = null; // フロー描画にしてブロック単位で段階表示する
+      }
+      steps = computeSteps(bodyLines, markerAt, reveal);
+    } else if (isItem) {
+      if (reveal === 'key-first') outReveal = 'sequential';
+    } else {
+      outReveal = 'none';
+    }
   }
   const incremental = outReveal !== 'none';
+  const srcStart = raw.length ? raw[0]!.offset : 0;
+  const lastRaw = raw.length ? raw[raw.length - 1]! : null;
+  const srcEnd = lastRaw ? lastRaw.offset + lastRaw.text.length : 0;
   return {
     content,
     columns,
@@ -262,6 +346,8 @@ function parseSlide(raw: SourceLine[]): Slide {
     incremental,
     reveal: outReveal,
     steps,
+    srcStart,
+    srcEnd,
     bodyLines,
     columnLines,
   };
@@ -299,11 +385,15 @@ function computeSteps(
   }
   const keyFirst = reveal === 'key-first';
   let keyIdx = merged.findIndex((m) => m.key);
-  if (keyFirst && keyIdx === -1) keyIdx = 0;
+  if (keyFirst && keyIdx === -1) {
+    // 明示が無ければ最初の見出しブロックをキーに(導入文ではなく要点を先頭に)。無ければ先頭。
+    keyIdx = starts.findIndex((s) => /^#{1,6}\s/.test((bodyLines[s]?.text ?? '').trim()));
+    if (keyIdx === -1) keyIdx = 0;
+  }
   const forceKey = keyFirst && keyIdx >= 0;
   let counter = forceKey ? 2 : 1;
   let prev = 1;
-  return merged.map((m, idx) => {
+  const result = merged.map((m, idx) => {
     const key = idx === keyIdx;
     let step: number;
     if (m.pin) step = 0;
@@ -319,6 +409,11 @@ function computeSteps(
     if (step > 0) prev = step;
     return { step, key };
   });
+  // ステップ番号を 1..K の連番に詰める(0=ピンは据え置き)。空きステップでの「無反応Next」を防ぐ。
+  const distinct = [...new Set(result.filter((r) => r.step > 0).map((r) => r.step))].sort((a, b) => a - b);
+  const remap = new Map(distinct.map((v, i) => [v, i + 1]));
+  for (const r of result) if (r.step > 0) r.step = remap.get(r.step) ?? r.step;
+  return result;
 }
 
 interface DirectiveSink {

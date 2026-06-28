@@ -1157,22 +1157,18 @@ body {
   opacity: 0.3;
 }
 
-/* スライドを直接編集(PowerPoint風の自由配置 + view ⇄ md 双方向)。 */
+/* スライドを直接編集。
+   Markdown 本文ブロックはレイアウトが配置し「その場で文字編集」のみ。
+   自由配置(移動・リサイズ)はオーバーレイ層(テキスト/図形/画像)で行う。 */
 
-/* 編集モードでは、ブロックはクリックで選択・ドラッグで移動できる。 */
-.deck-root.live .slide-body > [data-src] {
-  cursor: pointer;
+/* ブロック: クリックで選択(枠)、もう一度で文字編集。ホバーで薄いリング。
+   (段組セル内のブロックにも効くよう子孫セレクタにする) */
+.deck-root.live .slide-body [data-src] {
+  cursor: text;
   border-radius: 6px;
 }
-
-.deck-root.live .slide-body > [data-src]:hover {
-  box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--accent) 28%, transparent);
-}
-
-/* 自由配置されたブロック(位置上書きあり)。 */
-.slide-body > [data-src].ov-placed {
-  margin: 0;
-  z-index: 1;
+.deck-root.live .slide-body [data-src]:hover {
+  box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--accent) 24%, transparent);
 }
 
 /* 文字編集中(contenteditable)はテキストカーソルとリングを出す。 */
@@ -1180,10 +1176,38 @@ body {
   cursor: text;
   border-radius: 6px;
 }
-
 .deck-root.editing [contenteditable]:focus {
   outline: none;
   box-shadow: 0 0 0 2px var(--accent);
+}
+
+/* 段階表示の番号バッジ(編集中のみ表示)。ブロック/セルの左肩に小さく。 */
+/* 段階表示の番号バッジ層。deckRoot 直下に重ね、実測座標で各ステップ要素の左上隅へ載せる。
+   ブロック内に入れないので、各レイアウトのパディング/overflow/カウンタ/言語ラベル/表セルと
+   一切衝突せず、本文(Markdown)にも混入しない。 */
+.step-badge-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 6;
+}
+.step-badge {
+  position: absolute;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--ui-accent);
+  color: #fff;
+  font-family: var(--ui-sans);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  pointer-events: none;
 }
 
 /* 図形レイヤ。スライド全面に重ね、図形だけがクリックを受ける。 */
@@ -1210,6 +1234,7 @@ body {
 .deck-root.live .ov-shape {
   pointer-events: auto;
   cursor: move;
+  touch-action: none; /* タッチのドラッグがページのパン/ズームに奪われないように */
 }
 
 /* 自由配置の画像。箱いっぱいに cover で敷く。内側の img はドラッグを奪わない。 */
@@ -1225,6 +1250,42 @@ body {
   pointer-events: none;
   -webkit-user-drag: none;
   user-select: none;
+}
+
+/* 自由配置のテキストボックス。 */
+.ov-shape-text {
+  border-radius: 4px;
+}
+.ov-text {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  font-family: var(--body-font);
+  font-size: 3.4cqh;
+  line-height: 1.5;
+  color: var(--fg);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  outline: none;
+}
+.deck-root.live .ov-shape-text {
+  box-shadow: inset 0 0 0 1px var(--rule);
+}
+/* 空テキスト箱のプレースホルダ「テキスト」はライブ編集中だけ見せる。発表・書き出し・印刷・
+   一覧(deck-root.live が付かない描画)では隠し、空箱の文言が成果物に焼き込まれないようにする。 */
+.ov-text-ph {
+  display: none;
+}
+.deck-root.live .ov-text-ph {
+  display: inline;
+  color: var(--muted, var(--fg));
+  opacity: 0.65;
+}
+/* 編集中の対象テキスト箱だけに適用(deck全体の .editing にすると、無関係なテキスト箱にも
+   スクロールバーが出て折り返しが変わる副作用がある)。 */
+.ov-text[contenteditable='true'] {
+  cursor: text;
+  overflow-y: auto; /* 入りきらない行をスクロールで見られるように(キャレットが箱外で消えない) */
 }
 
 /* 選択枠と8方向のハンドル。 */
@@ -1244,6 +1305,15 @@ body {
   border: 1.5px solid var(--ui-accent);
   border-radius: 2px;
   pointer-events: auto;
+  touch-action: none;
+}
+
+/* ブロック選択は枠のみ(リサイズ不可)。図形/画像/テキストだけ8ハンドルを出す。 */
+.sel-frame[data-kind='block'] {
+  outline-style: dashed;
+}
+.sel-frame[data-kind='block'] .sel-h {
+  display: none;
 }
 
 .sel-nw {
@@ -1365,6 +1435,7 @@ body {
 /* 段階表示 */
 .frag-hidden {
   opacity: 0;
+  pointer-events: none; /* 見えていないステップを誤って掴まない */
   transform: translateY(1cqh);
   transition:
     opacity 0.3s var(--ease),
@@ -1724,7 +1795,171 @@ body {
   color: var(--ui-soft);
 }
 
-/* ヘルプ */
+/* ── ガイド(ヘルプ & FAQ) ── */
+.guide {
+  flex-direction: column;
+}
+.guide-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-5);
+  border-bottom: 1px solid var(--ui-line);
+  flex-wrap: wrap;
+}
+.guide-head .head-titles {
+  margin-right: auto;
+}
+.guide-head input {
+  font: inherit;
+  font-size: var(--ts-sm);
+  padding: 8px 12px;
+  min-width: 220px;
+  border: 1px solid var(--ui-line);
+  border-radius: var(--r-sm);
+  background: var(--ui-bg);
+  color: var(--ui-ink);
+}
+.guide-head input:focus-visible {
+  border-color: var(--ui-accent);
+  outline-offset: 1px;
+}
+.guide-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+.guide-nav {
+  flex: none;
+  width: 180px;
+  overflow: auto;
+  padding: var(--sp-4) var(--sp-3);
+  border-right: 1px solid var(--ui-line);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.guide-nav button {
+  font: inherit;
+  font-size: var(--ts-sm);
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--ui-soft);
+  border-radius: var(--r-sm);
+  padding: 8px 12px;
+  cursor: pointer;
+}
+.guide-nav button:hover {
+  background: var(--ui-accent-tint);
+  color: var(--ui-accent);
+}
+.guide-content {
+  flex: 1;
+  overflow: auto;
+  padding: var(--sp-5) var(--sp-6);
+  scroll-behavior: smooth;
+}
+.g-sec {
+  max-width: 60ch;
+  margin: 0 auto var(--sp-6);
+}
+.g-sec h3 {
+  font-size: var(--ts-lg);
+  letter-spacing: -0.01em;
+  margin-bottom: var(--sp-3);
+  padding-top: var(--sp-2);
+}
+.g-sec p,
+.g-sec li {
+  font-size: 14px;
+  line-height: 1.8;
+  color: var(--ui-ink);
+}
+.g-sec ul {
+  padding-left: 1.3em;
+  margin: var(--sp-2) 0;
+}
+.g-sec li {
+  margin-bottom: 4px;
+}
+.g-sec code {
+  font-family: var(--mono);
+  font-size: 0.86em;
+  background: color-mix(in srgb, var(--ui-accent) 12%, transparent);
+  padding: 0.1em 0.4em;
+  border-radius: 4px;
+}
+.g-warn,
+.g-note {
+  margin-top: var(--sp-3);
+  padding: 10px 14px;
+  border-radius: var(--r-sm);
+  font-size: 13px;
+}
+.g-warn {
+  background: color-mix(in srgb, #e0a800 18%, var(--ui-panel));
+  border: 1px solid color-mix(in srgb, #e0a800 40%, var(--ui-line));
+}
+.g-note {
+  background: var(--ui-accent-tint);
+  border: 1px solid color-mix(in srgb, var(--ui-accent) 30%, var(--ui-line));
+}
+.g-code {
+  position: relative;
+  margin: var(--sp-3) 0;
+  padding: 14px 16px;
+  background: var(--ui-bg);
+  border: 1px solid var(--ui-line);
+  border-radius: var(--r-md);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.g-copy {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  font: inherit;
+  font-size: 11px;
+  border: 1px solid var(--ui-line);
+  background: var(--ui-panel);
+  color: var(--ui-soft);
+  border-radius: var(--r-sm);
+  padding: 3px 8px;
+  cursor: pointer;
+}
+.g-copy:hover {
+  border-color: var(--ui-accent);
+  color: var(--ui-accent);
+}
+.g-qa {
+  margin-bottom: var(--sp-4);
+}
+.g-qa b {
+  display: block;
+  margin-bottom: 2px;
+}
+.g-qa p {
+  color: var(--ui-soft);
+}
+dl.g-keys {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 18px;
+  font-size: 14px;
+}
+dl.g-keys dt {
+  font-family: var(--mono);
+  color: var(--ui-accent);
+}
+dl.g-keys dd {
+  color: var(--ui-soft);
+}
+
+/* ヘルプ(旧カード。gslides 案内などで使用) */
 .help {
   align-items: center;
   justify-content: center;
@@ -2110,6 +2345,70 @@ body.faux-full .deck-root {
   width: 100vw;
   max-width: calc(100dvh * 16 / 9);
   border-radius: 0;
+}
+
+/* 擬似全画面の脱出ボタン(タッチ端末で Esc が無くても抜けられる)。 */
+.faux-exit {
+  position: fixed;
+  top: max(12px, env(safe-area-inset-top));
+  right: max(12px, env(safe-area-inset-right));
+  z-index: 90;
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+.faux-exit:hover {
+  background: rgba(0, 0, 0, 0.7);
+}
+
+/* 段階表示の per-slide コントロール(編集時、スライド下中央に浮かべる)。 */
+.reveal-bar {
+  position: absolute;
+  bottom: 30px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ui-panel) 92%, transparent);
+  border: 1px solid var(--ui-line);
+  box-shadow: var(--shadow-pop);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+.reveal-bar-label {
+  font-size: 11px;
+  color: var(--ui-soft);
+  padding: 0 4px;
+}
+.reveal-bar button {
+  font: inherit;
+  font-size: 12px;
+  border: none;
+  background: transparent;
+  color: var(--ui-soft);
+  border-radius: 999px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.reveal-bar button:hover {
+  background: var(--ui-accent-tint);
+  color: var(--ui-accent);
+}
+.reveal-bar button.on {
+  background: var(--ui-accent);
+  color: #fff;
 }
 
 /* 中サイズではデッキ高さに dvh を使い、モバイルのツールバー出没でも崩れにくく。 */
