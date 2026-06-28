@@ -1,5 +1,5 @@
 import './style.css';
-import { parseDeck, stripRevealDirectiveLines, type RevealMode } from './deck';
+import { deleteStartWithMarkers, parseDeck, setBlockMarker, stripRevealDirectiveLines, type BlockMarker, type RevealMode } from './deck';
 import { blockToMd } from './edit';
 import { deckFilename, exportPdf, exportPptx, renderSlidePng, slideImageName } from './export';
 import {
@@ -12,6 +12,7 @@ import {
   loadOverlay,
   newId,
   saveOverlay,
+  shapeLabel,
   slideOverlay,
   type Box,
   type ImageShape,
@@ -330,13 +331,14 @@ theme: ai-hiru-mincho
         <section class="g-sec" id="g-reveal">
           <h3>段階表示(一つずつ見せる)</h3>
           <p>「開いたら①、→ で②、また → で③…」のように順番に見せる機能です。</p>
-          <p><b>いちばん簡単:</b> 「スライドを直接編集」をオンにすると、スライド下に <b>段階表示</b> の切り替えが出ます。<b>順番に</b> を選ぶだけ。各ブロックに番号バッジが付き、発表で → を押すと順に現れます。</p>
+          <p><b>いちばん簡単(右クリックで番号を付ける):</b> 「スライドを直接編集」をオンにし、見せたいブロックを<b>右クリック → 「順番を付ける」</b>で 1・2・3… と番号を振ります。番号を付けたブロックだけがその順で現れ、付けていないブロックは<b>最初から表示</b>されます(段階表示は自動でオンになります)。各ブロック左肩の番号バッジをクリックしても同じメニューが開きます。</p>
           <ul>
-            <li><b>順番に</b> … 上から1つずつ表示</li>
-            <li><b>要点先</b> … 先に要点(最初の見出し)を見せ、続きを順に。通過した内容は少し控えめに</li>
+            <li><b>順番を付ける ▸ 1 / 2 / 3 / 次の番号</b> … この順で現れる</li>
+            <li><b>複数まとめて同時に:</b> ブロックを <b>Shift+クリック</b> で複数選び、右クリック →「<b>まとめて同時に出す</b>」(グループ化)</li>
+            <li><b>直前と同時に出す</b> / <b>要点として先に出す</b> / <b>ずっと表示する</b> / <b>この順番から外す</b> … 右クリックから個別に指定</li>
           </ul>
-          <p>編集中は全ブロックが見えています(番号で順序を確認できます)。実際に隠れて段階表示になるのは<b>発表・閲覧のとき</b>です。書き出し(PDF / PPTX / PNG)では畳まれて<b>最終状態(全部表示)</b>になります。</p>
-          <p class="g-note">上級者向けに記法でも指定できます: <code>&lt;!-- reveal: key-first --&gt;</code> と、ブロックの直前に <code>&lt;!-- key --&gt;</code>(要点)・<code>&lt;!-- step: N --&gt;</code>(順番)・<code>&lt;!-- group --&gt;</code>(前と同時)・<code>&lt;!-- pin --&gt;</code>(常に表示)。GUIの「段階表示」で選ぶと、スライド全体のモード <code>&lt;!-- reveal: ... --&gt;</code> が自動で書かれます(各ブロックの key / step / group / pin は手書きで指定します)。</p>
+          <p>スライドの何もない所を<b>右クリック →「段階表示」</b>から、<b>順番に(上から)</b>・<b>要点を先に</b>・<b>番号で指定</b>・<b>なし</b> をまとめて切り替えることもできます。編集中は全ブロックが見えています(番号で順序を確認)。実際に隠れて段階表示になるのは<b>発表・閲覧のとき</b>で、書き出し(PDF / PPTX / PNG)では<b>最終状態(全部表示)</b>になります。</p>
+          <p class="g-note">上級者向けに記法でも指定できます: <code>&lt;!-- reveal: sequential | key-first | manual --&gt;</code> と、ブロックの直前に <code>&lt;!-- step: N --&gt;</code>(順番)・<code>&lt;!-- group --&gt;</code>(前と同時)・<code>&lt;!-- key --&gt;</code>(要点)・<code>&lt;!-- pin --&gt;</code>(常に表示)。右クリック操作はこの記法を自動で書き込みます。</p>
         </section>
 
         <section class="g-sec" id="g-edit">
@@ -344,7 +346,9 @@ theme: ai-hiru-mincho
           <p>ツールバーの「スライドを直接編集」をオンにします。</p>
           <ul>
             <li><b>本文の文字</b> … クリックで選択 → もう一度クリック/ダブルクリックでその場編集。Markdown 側にも即反映されます。本文の<b>位置はレイアウトが決めます</b>(自由には動かしません)。</li>
-            <li><b>自由配置</b> … 左上の挿入ツールバーから <b>テキストボックス・図形・画像</b> を追加。ドラッグで移動、角ハンドルでリサイズ、矢印キーで微調整(Shiftで大きく)、Delete で削除。これらは Markdown には入りません(レイアウト情報として別に保存)。</li>
+            <li><b>右クリックメニュー</b> … 本文ブロックを右クリックすると、段階表示の<b>順番付け</b>・グループ化・編集・削除など。何もない所を右クリックすると<b>テキスト/図形/画像の追加</b>と<b>段階表示</b>の切り替え。図形・画像を右クリックすると<b>複製・重なり順(最前面/最背面)・削除</b>。</li>
+            <li><b>自由配置</b> … テキストボックス・図形・画像を追加し、ドラッグで移動、角ハンドルでリサイズ、矢印キーで微調整(Shiftで大きく)、Delete で削除。これらは Markdown には入りません(レイアウト情報として別に保存)。</li>
+            <li><b>整列ガイド</b> … 移動中、スライドの中心・端や他の要素の辺に近づくと自動で吸着し、ガイド線が出ます。<b>Cmd / Ctrl(または Alt)</b>を押しながら動かすと吸着を一時的に無効化できます。</li>
           </ul>
         </section>
 
@@ -625,6 +629,12 @@ stepLayer.className = 'step-badge-layer';
 stepLayer.setAttribute('aria-hidden', 'true');
 deckRoot.appendChild(stepLayer);
 
+// 自由配置のドラッグ中に出すスナップ用のガイド線レイヤ(スライドの中心・端・他図形の辺に吸着)。
+const snapLayer = document.createElement('div');
+snapLayer.className = 'snap-guides';
+snapLayer.setAttribute('aria-hidden', 'true');
+deckRoot.appendChild(snapLayer);
+
 // 挿入ツールバー。
 const insertBar = document.createElement('div');
 insertBar.className = 'insert-bar';
@@ -688,24 +698,298 @@ document.addEventListener('click', (e) => {
   }
 });
 
-// ── 段階表示の per-slide コントロール(なし / 順番に / 要点先) ──
-const revealBar = document.createElement('div');
-revealBar.className = 'reveal-bar';
-revealBar.hidden = true;
-revealBar.innerHTML =
-  '<span class="reveal-bar-label">段階表示</span>' +
-  '<button data-reveal="none" type="button">なし</button>' +
-  '<button data-reveal="sequential" type="button">順番に</button>' +
-  '<button data-reveal="key-first" type="button">要点先</button>';
-deckRoot.appendChild(revealBar);
-revealBar.addEventListener('pointerdown', (e) => e.stopPropagation());
-revealBar.addEventListener('click', (e) => {
-  const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-reveal]');
-  if (b) {
-    setSlideReveal(b.dataset.reveal as RevealMode);
-    b.blur(); // フォーカスを残すと keydown ガードが矢印/スペースを飲み込み移動できなくなる
+// ── 複数選択(本文ブロック) ──
+// primary は単一 sel(既存の frame/drag/編集が依存)。multi は選択ブロックの data-src 開始オフセット集合。
+// HTML要素ではなくオフセットを持つので rebuild で DOM が作り直されても [data-src^] で再解決できる。
+const multi = new Set<number>();
+const multiLayer = document.createElement('div');
+multiLayer.className = 'multi-sel-layer';
+multiLayer.setAttribute('aria-hidden', 'true');
+deckRoot.appendChild(multiLayer);
+function clearMultiOutlines(): void {
+  multiLayer.replaceChildren();
+}
+function drawMultiOutlines(): void {
+  clearMultiOutlines();
+  if (!liveEdit || presenting || multi.size < 2) return;
+  const dr = deckRoot.getBoundingClientRect();
+  for (const start of multi) {
+    const el = stage.querySelector<HTMLElement>(`.slide-body [data-src^="${start}-"]`);
+    if (!el) continue;
+    const r = el.getBoundingClientRect();
+    const o = document.createElement('div');
+    o.className = 'multi-sel-box';
+    o.style.left = `${r.left - dr.left}px`;
+    o.style.top = `${r.top - dr.top}px`;
+    o.style.width = `${r.width}px`;
+    o.style.height = `${r.height}px`;
+    multiLayer.appendChild(o);
   }
+}
+
+// ── 右クリック コンテキストメニュー ──
+type CtxItem = { label: string; run?: () => void; disabled?: boolean; sub?: CtxItem[] } | 'sep';
+const ctxMenu = document.createElement('div');
+ctxMenu.className = 'ctx-menu';
+ctxMenu.hidden = true;
+deckRoot.appendChild(ctxMenu);
+ctxMenu.addEventListener('pointerdown', (e) => e.stopPropagation());
+ctxMenu.addEventListener('contextmenu', (e) => e.preventDefault());
+// メニュー外(右のエディタ・上部ツールバー等 deckRoot 外も含む)を押したら閉じる。
+// メニュー自身の pointerdown は上で stopPropagation 済みなので、ここには伝わらない。
+document.addEventListener('pointerdown', () => closeCtxMenu());
+function closeCtxMenu(): void {
+  if (ctxMenu.hidden) return;
+  ctxMenu.hidden = true;
+  ctxMenu.replaceChildren();
+}
+function renderCtxItems(items: CtxItem[], into: HTMLElement): void {
+  for (const it of items) {
+    if (it === 'sep') {
+      const s = document.createElement('div');
+      s.className = 'ctx-sep';
+      into.appendChild(s);
+      continue;
+    }
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'ctx-item';
+    b.textContent = it.label;
+    if (it.disabled) b.disabled = true;
+    if (it.sub && it.sub.length) {
+      b.classList.add('has-sub');
+      const sub = document.createElement('div');
+      sub.className = 'ctx-sub';
+      renderCtxItems(it.sub, sub);
+      b.appendChild(sub);
+    } else if (it.run) {
+      const run = it.run;
+      b.addEventListener('click', () => {
+        run();
+        closeCtxMenu();
+      });
+    }
+    into.appendChild(b);
+  }
+}
+function openContextMenu(target: 'block' | 'shape' | 'multi' | 'canvas', e: { clientX: number; clientY: number }): void {
+  ctxMenu.replaceChildren();
+  renderCtxItems(buildCtxItems(target), ctxMenu);
+  ctxMenu.hidden = false;
+  const dr = deckRoot.getBoundingClientRect();
+  const x = Math.min(e.clientX - dr.left, dr.width - ctxMenu.offsetWidth - 6);
+  const y = Math.min(e.clientY - dr.top, dr.height - ctxMenu.offsetHeight - 6);
+  ctxMenu.style.left = `${Math.max(4, x)}px`;
+  ctxMenu.style.top = `${Math.max(4, y)}px`;
+  // メニューが右寄りのときは、サブメニューを左側に開いて画面外に切れないようにする。
+  ctxMenu.classList.toggle('flip-sub', x + ctxMenu.offsetWidth + 160 > dr.width);
+}
+
+// 番号バッジのクリック → 対象ブロックを選択してブロック用メニューを開く(段組では actionable 無し)。
+stepLayer.addEventListener('pointerdown', (e) => e.stopPropagation());
+stepLayer.addEventListener('click', (e) => {
+  const badge = (e.target as HTMLElement).closest<HTMLElement>('.step-badge.actionable');
+  const start = /^(\d+)-/.exec(badge?.dataset.src ?? '')?.[1];
+  if (start == null) return;
+  const block = stage.querySelector<HTMLElement>(`.slide-body [data-src^="${start}-"]`);
+  if (!block) return;
+  multi.clear();
+  selectBlock(block);
+  drawMultiOutlines();
+  openContextMenu('block', { clientX: e.clientX, clientY: e.clientY });
 });
+
+// 現在スライドの最大ライブステップ(番号付けの「次の番号」算出用)。
+function slideMaxStep(): number {
+  return (presenter.current()?.steps ?? []).reduce((m, s) => Math.max(m, s.step), 0);
+}
+// 段組(item-layout)は data-src を持つ per-block マーカーが書けない → 順番系を無効化。
+function perBlockEnabled(): boolean {
+  return !presenter.current()?.columns;
+}
+
+// 現在スライドに reveal 指定が無ければ manual を前置(番号を振ったら自動で段階表示に)。
+// ブロックへのマーカー書き込みの「後」に呼ぶこと(directive 前置はスライド先頭=ブロック群より前で
+// オフセットを動かすため、先に呼ぶと書き込み位置がずれる)。呼び出し側が persist/rebuild する。
+function ensureSlideManual(): void {
+  const deck = parseDeck(mdInput.value);
+  const slide = deck.slides[presenter.index];
+  if (!slide || slide.reveal !== 'none') return;
+  const v = mdInput.value;
+  const region = stripRevealDirectiveLines(v.slice(slide.srcStart, slide.srcEnd));
+  mdInput.value = v.slice(0, slide.srcStart) + '<!-- reveal: manual -->\n' + region + v.slice(slide.srcEnd);
+}
+
+// 複数選択ブロックをまとめて同じ番号(step:N)にする。全メンバーに明示 step:N を書くので、
+// 非連続の選択でも(間に別ブロックがあっても)確実に同じステップになる。降順オフセットで書く。
+function groupSelection(): void {
+  const offsets = [...multi].sort((a, b) => a - b);
+  if (offsets.length < 2) return;
+  const n = slideMaxStep() + 1;
+  commitEdit();
+  if (mdInput.value.includes('\r')) mdInput.value = mdInput.value.replace(/\r\n?/g, '\n');
+  for (let i = offsets.length - 1; i >= 0; i -= 1) {
+    mdInput.value = setBlockMarker(mdInput.value, offsets[i]!, `step:${n}`);
+  }
+  ensureSlideManual(); // マーカー書込の後に(前置でオフセットがずれないように)
+  multi.clear();
+  persistMd();
+  rebuild(true);
+  toast('まとめて同時に表示します');
+}
+function ungroupSelection(): void {
+  const offsets = [...multi].sort((a, b) => a - b);
+  if (!offsets.length) return;
+  commitEdit();
+  if (mdInput.value.includes('\r')) mdInput.value = mdInput.value.replace(/\r\n?/g, '\n');
+  for (let i = offsets.length - 1; i >= 0; i -= 1) mdInput.value = setBlockMarker(mdInput.value, offsets[i]!, 'auto');
+  multi.clear();
+  persistMd();
+  rebuild(true);
+  toast('グループを解除しました');
+}
+// 複数選択ブロックをまとめて削除(降順で範囲削除。直前のマーカー行も巻き込む)。
+function deleteMultiBlocks(): void {
+  const ranges: Array<[number, number]> = [];
+  for (const start of multi) {
+    const el = stage.querySelector<HTMLElement>(`.slide-body [data-src^="${start}-"]`);
+    if (el) ranges.push(rangeOf(el));
+  }
+  ranges.sort((a, b) => b[0] - a[0]);
+  commitEdit();
+  if (mdInput.value.includes('\r')) mdInput.value = mdInput.value.replace(/\r\n?/g, '\n');
+  for (const [s, e] of ranges) {
+    const ds = deleteStartWithMarkers(mdInput.value, s);
+    mdInput.value = mdInput.value.slice(0, ds) + mdInput.value.slice(e);
+  }
+  multi.clear();
+  deselect();
+  persistMd();
+  rebuild(true);
+}
+
+// 図形の重なり順(配列順=描画順)を変える。
+function reorderShape(id: string, where: 'front' | 'back' | 'up' | 'down'): void {
+  const arr = overlay[presenter.index]?.shapes;
+  if (!arr) return;
+  const i = arr.findIndex((s) => s.id === id);
+  if (i < 0) return;
+  const [sh] = arr.splice(i, 1);
+  if (!sh) return;
+  const j = where === 'front' ? arr.length : where === 'back' ? 0 : where === 'up' ? Math.min(arr.length, i + 1) : Math.max(0, i - 1);
+  arr.splice(j, 0, sh);
+  saveOverlay(overlay);
+  decorateStage();
+}
+function duplicateShape(id: string): void {
+  const arr = overlay[presenter.index]?.shapes;
+  const sh = arr?.find((s) => s.id === id);
+  if (!arr || !sh) return;
+  const copy = { ...sh, id: newId(), x: Math.min(97, sh.x + 3), y: Math.min(97, sh.y + 3) } as Shape;
+  arr.push(copy);
+  if (!saveOverlay(overlay)) {
+    arr.pop();
+    toast('保存できませんでした(容量超過の可能性)');
+    return;
+  }
+  decorateStage();
+  const el = stage.querySelector<HTMLElement>(`.ov-shape[data-sid="${copy.id}"]`);
+  if (el) selectShape(el);
+}
+
+// コンテキストメニューの項目をターゲット別に組み立てる。
+function buildCtxItems(target: 'block' | 'shape' | 'multi' | 'canvas'): CtxItem[] {
+  if (target === 'canvas') {
+    const noReveal = NO_REVEAL_LAYOUTS.includes(presenter.current()?.layout ?? '');
+    const items: CtxItem[] = [
+      { label: 'テキストボックスを追加', run: () => insertTextShape() },
+      {
+        label: '図形を追加…',
+        sub: (['rect', 'ellipse', 'triangle', 'line', 'arrow'] as VectorKind[]).map((k) => ({
+          label: shapeLabel(k),
+          run: () => insertShape(k),
+        })),
+      },
+      { label: '画像を追加…', run: () => openImagePicker() },
+    ];
+    if (!noReveal) {
+      items.push('sep', {
+        label: '段階表示…',
+        sub: [
+          { label: 'なし', run: () => setSlideReveal('none') },
+          { label: '順番に(上から)', run: () => setSlideReveal('sequential') },
+          { label: '要点を先に', run: () => setSlideReveal('key-first') },
+          { label: '番号で指定(手動)', run: () => setSlideReveal('manual') },
+        ],
+      });
+    }
+    return items;
+  }
+  if (target === 'shape') {
+    const sh = sel?.kind === 'shape' ? findShape(sel.id) : undefined;
+    const id = sel?.kind === 'shape' ? sel.id : '';
+    const items: CtxItem[] = [{ label: '複製する', run: () => duplicateShape(id) }];
+    if (sh && isTextShape(sh)) items.push({ label: 'テキストを編集', run: () => enterEditText(sel!.el, id) });
+    items.push(
+      'sep',
+      { label: '最前面へ', run: () => reorderShape(id, 'front') },
+      { label: '前面へ', run: () => reorderShape(id, 'up') },
+      { label: '背面へ', run: () => reorderShape(id, 'down') },
+      { label: '最背面へ', run: () => reorderShape(id, 'back') },
+      'sep',
+      { label: '削除する', run: () => deleteSelection() },
+    );
+    return items;
+  }
+  if (target === 'multi') {
+    return [
+      { label: `まとめて同時に出す(${multi.size}件)`, run: () => groupSelection(), disabled: !perBlockEnabled() },
+      { label: 'グループを解除', run: () => ungroupSelection(), disabled: !perBlockEnabled() },
+      'sep',
+      { label: '選択をまとめて削除', run: () => deleteMultiBlocks() },
+    ];
+  }
+  // block
+  const start = sel?.kind === 'block' ? rangeOf(sel.el)[0] : -1;
+  const canMark = perBlockEnabled() && start >= 0;
+  const maxN = slideMaxStep();
+  const nums: CtxItem[] = [];
+  for (let i = 1; i <= Math.max(1, maxN) + 1; i += 1) {
+    const n = i;
+    nums.push({ label: n === maxN + 1 ? `${n}(次の番号)` : `${n}`, run: () => applyBlockMarker(start, `step:${n}`) });
+  }
+  return [
+    { label: '文字を編集', run: () => enterEditBlock(sel!.el) },
+    'sep',
+    { label: '順番を付ける…', sub: nums, disabled: !canMark },
+    { label: '直前と同時に出す', run: () => applyBlockMarker(start, 'group'), disabled: !canMark },
+    { label: '要点として先に出す', run: () => applyBlockMarker(start, 'key'), disabled: !canMark },
+    { label: 'ずっと表示する', run: () => applyBlockMarker(start, 'pin'), disabled: !canMark },
+    { label: 'この順番から外す', run: () => applyBlockMarker(start, 'auto'), disabled: !canMark },
+    'sep',
+    { label: 'このブロックを削除', run: () => deleteSelection() },
+  ];
+}
+
+// 対象ブロックの直前にマーカーを書き込み(または除去)、再描画する。
+function applyBlockMarker(blockStart: number, marker: BlockMarker): void {
+  commitEdit();
+  if (mdInput.value.includes('\r')) mdInput.value = mdInput.value.replace(/\r\n?/g, '\n');
+  mdInput.value = setBlockMarker(mdInput.value, blockStart, marker);
+  if (marker !== 'auto') ensureSlideManual(); // 番号/グループ/要点/常時表示を付けたら段階表示を自動ON(manual)
+  persistMd();
+  rebuild(true);
+  const msg = marker === 'auto'
+    ? 'このブロックを通常に戻しました'
+    : marker === 'key'
+      ? 'このブロックを要点にしました'
+      : marker === 'group'
+        ? '直前と同時に表示します'
+        : marker === 'pin'
+          ? '常に表示します'
+          : `${marker.replace('step:', '')}番目に表示します`;
+  toast(msg);
+}
 
 // 現在スライドの段階表示モードを Markdown のディレクティブとして設定する。
 function setSlideReveal(mode: RevealMode): void {
@@ -725,7 +1009,13 @@ function setSlideReveal(mode: RevealMode): void {
   persistMd();
   rebuild(true);
   toast(
-    mode === 'none' ? '段階表示をオフにしました' : mode === 'key-first' ? '段階表示: 要点を先に' : '段階表示: 順番に',
+    mode === 'none'
+      ? '段階表示をオフにしました'
+      : mode === 'key-first'
+        ? '段階表示: 要点を先に'
+        : mode === 'manual'
+          ? '段階表示: 番号で指定'
+          : '段階表示: 順番に',
   );
 }
 
@@ -753,15 +1043,26 @@ function currentRevealMode(): RevealMode {
 function positionStepBadges(): void {
   clearStepBadges();
   if (!liveEdit || presenting) return;
-  if (currentRevealMode() === 'none') return;
+  const mode = currentRevealMode();
+  if (mode === 'none') return;
+  const manual = mode === 'manual';
   const dr = deckRoot.getBoundingClientRect();
+  // フロー(段組でない)スライドでは、バッジをクリックして各ブロックの役割を設定できる。
+  const actionable = !presenter.current()?.columns;
   for (const el of stage.querySelectorAll<HTMLElement>('.slide-body [data-step]')) {
     const r = el.getBoundingClientRect();
     if (r.width === 0 && r.height === 0) continue; // 非表示要素は飛ばす
     const s = Number(el.dataset.step) || 0;
+    // manual モードの無印ブロック(step0)はチップを出さない(半完成スライドが「常」だらけにならない)。
+    if (manual && s === 0) continue;
     const badge = document.createElement('span');
     badge.className = 'step-badge';
     badge.textContent = s === 0 ? '常' : String(s);
+    if (actionable && el.dataset.src) {
+      badge.classList.add('actionable');
+      badge.dataset.src = el.dataset.src; // ブロックの原文範囲(右クリックメニューで対象ブロックを解決)
+      badge.title = 'クリックで段階表示の設定';
+    }
     stepLayer.appendChild(badge);
     // バッジの実寸を測り、ブロック左上の角に少しはみ出して載せる(通知バッジ風。本文に被りにくい)。
     // 端ぴったりのブロック(full レイアウト等)で負座標になると deckRoot の overflow/角丸で切れるため 0 以上に。
@@ -775,18 +1076,7 @@ function positionStepBadges(): void {
 // 段階表示に対応しないレイアウト(これらは reveal を常に none に落とす)。バーを出さない。
 const NO_REVEAL_LAYOUTS = ['quote', 'section', 'image-left', 'image-right'];
 function updateRevealUi(): void {
-  const cur = presenter.current();
-  const noReveal = !!cur && NO_REVEAL_LAYOUTS.includes(cur.layout);
-  const enable = liveEdit && !presenting && !noReveal;
-  revealBar.hidden = !enable;
-  if (!enable) {
-    clearStepBadges();
-    return;
-  }
-  const mode = currentRevealMode();
-  for (const b of revealBar.querySelectorAll<HTMLButtonElement>('button[data-reveal]')) {
-    b.classList.toggle('on', b.dataset.reveal === mode);
-  }
+  // 段階表示の操作は右クリックメニュー+番号バッジに集約(下部バーは廃止)。ここではバッジの更新のみ。
   positionStepBadges();
 }
 
@@ -802,6 +1092,85 @@ function findShape(id: string): Shape | undefined {
 function currentBox(id: string): Box {
   const sh = findShape(id);
   return sh ? { x: sh.x, y: sh.y, w: sh.w, h: sh.h } : { x: 0, y: 0, w: 10, h: 10 };
+}
+
+// ── スナップ(整列ガイド) ──
+const SNAP_T = 1.4; // 吸着のしきい値(%)
+function clearSnapGuides(): void {
+  snapLayer.replaceChildren();
+}
+// 基準線: スライドの 0/50/100 と、自分以外の図形の左右上下と中心。
+function snapTargets(dragId: string): { xs: number[]; ys: number[] } {
+  const xs = [0, 50, 100];
+  const ys = [0, 50, 100];
+  for (const s of overlay[presenter.index]?.shapes ?? []) {
+    if (s.id === dragId) continue;
+    xs.push(s.x, s.x + s.w / 2, s.x + s.w);
+    ys.push(s.y, s.y + s.h / 2, s.y + s.h);
+  }
+  return { xs, ys };
+}
+// 1本のガイド線を、スライド領域の実寸に合わせて配置する。
+function makeGuide(kind: 'v' | 'h', pct: number): HTMLElement {
+  const g = document.createElement('div');
+  g.className = `snap-guide snap-${kind}`;
+  const sr = (slideEl() ?? stage).getBoundingClientRect();
+  const dr = deckRoot.getBoundingClientRect();
+  if (kind === 'v') {
+    g.style.left = `${sr.left - dr.left + (pct / 100) * sr.width}px`;
+    g.style.top = `${sr.top - dr.top}px`;
+    g.style.height = `${sr.height}px`;
+  } else {
+    g.style.top = `${sr.top - dr.top + (pct / 100) * sr.height}px`;
+    g.style.left = `${sr.left - dr.left}px`;
+    g.style.width = `${sr.width}px`;
+  }
+  return g;
+}
+// 移動中の箱を基準線へ吸着し、合った線をガイド表示して返す(move 用)。
+type SnapHit = { d: number; shift: number; line: number } | null;
+function bestSnap(edges: Array<[number, number]>, base: number, targets: number[]): SnapHit {
+  let best: SnapHit = null;
+  for (const [v, off] of edges) {
+    for (const t of targets) {
+      const d = Math.abs(v - t);
+      if (d <= SNAP_T && (!best || d < best.d)) best = { d, shift: t - off - base, line: t };
+    }
+  }
+  return best;
+}
+function snapMove(box: Box, dragId: string): Box {
+  const { xs, ys } = snapTargets(dragId);
+  const bestX = bestSnap(
+    [
+      [box.x, 0],
+      [box.x + box.w / 2, box.w / 2],
+      [box.x + box.w, box.w],
+    ],
+    box.x,
+    xs,
+  );
+  const bestY = bestSnap(
+    [
+      [box.y, 0],
+      [box.y + box.h / 2, box.h / 2],
+      [box.y + box.h, box.h],
+    ],
+    box.y,
+    ys,
+  );
+  const out = { ...box };
+  const guides: HTMLElement[] = [];
+  if (bestX) {
+    out.x = box.x + bestX.shift;
+    guides.push(makeGuide('v', bestX.line));
+  }
+  if (bestY) {
+    out.y = box.y + bestY.shift;
+    guides.push(makeGuide('h', bestY.line));
+  }
+  snapLayer.replaceChildren(...guides);
+  return out;
 }
 
 function positionFrame(): void {
@@ -830,6 +1199,8 @@ function selectShape(el: HTMLElement): void {
 function deselect(): void {
   sel = null;
   frame.hidden = true;
+  multi.clear();
+  clearMultiOutlines();
 }
 
 // 箱を選択中の図形へ反映(overlayデータと要素スタイル両方)。図形(shape)専用。
@@ -892,6 +1263,8 @@ let draggedThisGesture = false;
 
 deckRoot.addEventListener('pointerdown', (e) => {
   if (!liveEdit || presenting) return;
+  if (e.button !== 0) return; // 右クリック等は contextmenu に任せる(選択や複数選択を壊さない)
+  closeCtxMenu(); // キャンバス操作で右クリックメニューを閉じる(メニュー自身は伝播停止済み)
   if (drag) return; // 進行中のドラッグ中は二本目以降のポインタを無視
   let t = e.target as HTMLElement;
   // 編集中に外側を押したら確定。確定で再描画/図形再生成が起きて元の要素が切り離されるので、
@@ -918,6 +1291,8 @@ deckRoot.addEventListener('pointerdown', (e) => {
   const shape = t.closest<HTMLElement>('.ov-shape');
   if (shape) {
     e.preventDefault();
+    multi.clear(); // 図形選択は本文ブロックの複数選択を解除(混在しない)
+    clearMultiOutlines();
     const id = shape.dataset.sid ?? '';
     const was = sel?.kind === 'shape' && sel.id === id;
     selectShape(shape);
@@ -925,10 +1300,22 @@ deckRoot.addEventListener('pointerdown', (e) => {
     deckRoot.setPointerCapture(e.pointerId);
     return;
   }
-  // Markdown ブロック → 選択(枠のみ)。すでに選択済みのブロックを再度押したら文字編集へ。
+  // Markdown ブロック → 選択(枠のみ)。Shift/Cmd/Ctrl で複数選択トグル。再度押したら文字編集へ。
   const block = t.closest<HTMLElement>('.slide-body [data-src]');
   if (block) {
     e.preventDefault();
+    if (e.shiftKey || e.metaKey || e.ctrlKey) {
+      if (sel?.kind === 'block') multi.add(rangeOf(sel.el)[0]); // 既存 primary も集合へ
+      const [bstart] = rangeOf(block);
+      if (multi.has(bstart)) multi.delete(bstart);
+      else multi.add(bstart);
+      if (multi.size <= 1) multi.clear();
+      selectBlock(block);
+      drawMultiOutlines();
+      return;
+    }
+    multi.clear();
+    clearMultiOutlines();
     if (sel?.kind === 'block' && sel.el === block) enterEditBlock(block, { x: e.clientX, y: e.clientY });
     else selectBlock(block);
     return;
@@ -943,6 +1330,37 @@ deckRoot.addEventListener('pointerdown', (e) => {
   }
 });
 
+// 右クリック → 文脈に応じたメニュー。ライブ編集外・編集中テキストはブラウザ標準メニューを残す。
+deckRoot.addEventListener('contextmenu', (e) => {
+  if (!liveEdit || presenting) return;
+  const t = e.target as HTMLElement;
+  if (editingBlock && editingBlock.contains(t)) return;
+  const shape = t.closest<HTMLElement>('.ov-shape');
+  const block = t.closest<HTMLElement>('.slide-body [data-src]');
+  if (shape) {
+    e.preventDefault();
+    multi.clear();
+    clearMultiOutlines();
+    selectShape(shape);
+    openContextMenu('shape', e);
+  } else if (block) {
+    e.preventDefault();
+    const [bstart] = rangeOf(block);
+    if (multi.size >= 2 && multi.has(bstart)) {
+      openContextMenu('multi', e); // 既存の複数選択を保ったままグループ操作
+    } else {
+      multi.clear();
+      clearMultiOutlines();
+      selectBlock(block);
+      openContextMenu('block', e);
+    }
+  } else if (t.closest('.stage')) {
+    e.preventDefault();
+    deselect();
+    openContextMenu('canvas', e);
+  }
+});
+
 deckRoot.addEventListener('pointermove', (e) => {
   if (!drag || sel?.kind !== 'shape') return;
   const sr = (slideEl() ?? stage).getBoundingClientRect();
@@ -954,8 +1372,13 @@ deckRoot.addEventListener('pointermove', (e) => {
   }
   let box: Box;
   if (drag.mode === 'move') {
-    box = clampBox({ ...drag.box, x: drag.box.x + dx, y: drag.box.y + dy });
+    box = { ...drag.box, x: drag.box.x + dx, y: drag.box.y + dy };
+    // Cmd/Ctrl/Alt を押している間はスナップ無効。それ以外は中心・端・他図形に吸着しガイド表示。
+    if (e.metaKey || e.ctrlKey || e.altKey) clearSnapGuides();
+    else box = snapMove(box, sel.id);
+    box = clampBox(box);
   } else {
+    clearSnapGuides();
     box = resizeBox(drag.box, drag.handle, dx, dy);
     const sh = findShape(sel.id);
     box =
@@ -968,6 +1391,7 @@ deckRoot.addEventListener('pointermove', (e) => {
 
 function endDrag(e: PointerEvent): void {
   if (!drag) return;
+  clearSnapGuides();
   try {
     deckRoot.releasePointerCapture(e.pointerId);
   } catch {
@@ -993,6 +1417,7 @@ deckRoot.addEventListener('lostpointercapture', () => {
   if (drag) {
     if (drag.moved) saveOverlay(overlay);
     drag = null;
+    clearSnapGuides();
   }
 });
 
@@ -1324,16 +1749,22 @@ function deleteSelection(): void {
     decorateStage();
     return;
   }
-  // ブロック: md本文から該当範囲を除去する。
-  const [start, e0] = rangeOf(sel.el);
+  // ブロック: md本文から該当範囲を除去する。直前の段階表示マーカー行も巻き込む(次へ継承させない)。
+  const [start0, e0] = rangeOf(sel.el);
+  const v0 = v0Normalized();
+  const start = deleteStartWithMarkers(v0, start0);
   let end = e0;
-  const v = mdInput.value;
-  if (v[end] === '\n') end += 1;
-  if (v[end] === '\n') end += 1;
-  mdInput.value = v.slice(0, start) + v.slice(end);
+  if (v0[end] === '\n') end += 1;
+  if (v0[end] === '\n') end += 1;
+  mdInput.value = v0.slice(0, start) + v0.slice(end);
   persistMd();
   deselect();
   rebuild(true);
+}
+// 改行を正規化した現在の Markdown(オフセット系の操作で \r ずれを防ぐ)。
+function v0Normalized(): string {
+  if (mdInput.value.includes('\r')) mdInput.value = mdInput.value.replace(/\r\n?/g, '\n');
+  return mdInput.value;
 }
 
 // 矢印キーでの微調整は自由配置の図形のみ(ブロックはレイアウトが配置)。
@@ -1385,6 +1816,7 @@ function decorateStage(): void {
     if (sel.el.isConnected) positionFrame();
     else deselect();
   }
+  drawMultiOutlines(); // 複数選択の枠も再描画(DOM が安定しているとき)
 }
 
 function setLiveEdit(on: boolean): void {
@@ -1441,19 +1873,22 @@ function fauxFull(on: boolean): void {
 }
 fauxExit.addEventListener('click', () => fauxFull(false));
 
-// 選択枠と段階表示バッジは、スライドの表示サイズ変化に追従させる(実測座標のため)。
+// 選択枠・段階表示バッジ・複数選択枠は、スライドの表示サイズ変化に追従させる(実測座標のため)。
 new ResizeObserver(() => {
   positionFrame();
   positionStepBadges();
+  drawMultiOutlines();
 }).observe(deckRoot);
 // 入場アニメ終了後に測り直す(アニメ中の transform で位置がズレないように)。
 stage.addEventListener('animationend', () => {
   positionFrame();
   positionStepBadges();
+  drawMultiOutlines();
 });
 
 // 移動前に編集を確定し、選択を解除してから動かす(Presenter内部のデッキを最新化)。
 function nav(action: () => void): void {
+  closeCtxMenu();
   commitEdit();
   deselect();
   flushView();
@@ -1895,9 +2330,10 @@ window.addEventListener('keydown', (ev) => {
   }
   if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
 
-  // Escape(オーバーレイが無いとき): 全画面を抜ける → 選択解除。
+  // Escape(オーバーレイが無いとき): 右クリックメニュー → 全画面 → 選択解除 の順で閉じる。
   if (ev.key === 'Escape') {
-    if (faux) fauxFull(false);
+    if (!ctxMenu.hidden) closeCtxMenu();
+    else if (faux) fauxFull(false);
     else if (sel) deselect();
     return;
   }
