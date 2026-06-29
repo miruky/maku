@@ -1,6 +1,6 @@
 import type { Deck, Slide } from './deck';
 import { renderMarkdown } from './markdown';
-import { slideHtml, slideHtmlMapped } from './render';
+import { deckTitles, slideHtml, slideHtmlMapped } from './render';
 
 export interface PresenterEls {
   stage: HTMLElement;
@@ -153,7 +153,12 @@ export class Presenter {
     this.els.stage.classList.remove('enter', 'enter-back');
     if (animate) void this.els.stage.offsetWidth;
     this.els.stage.innerHTML = slide
-      ? slideHtmlMapped(slide, { meta: this.deck.meta, index: this.idx, total: this.total })
+      ? slideHtmlMapped(slide, {
+          meta: this.deck.meta,
+          index: this.idx,
+          total: this.total,
+          titles: slide.toc ? deckTitles(this.deck.slides) : undefined,
+        })
       : '<div class="slide"><div class="slide-body"><p class="empty">スライドがありません</p></div></div>';
     if (animate) this.els.stage.classList.add(dir === 'back' ? 'enter-back' : 'enter');
 

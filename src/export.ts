@@ -1,7 +1,7 @@
 import { deckRatio, type Deck } from './deck';
 import { applyOverlay, slideOverlay, type Overlay } from './overlay';
 import { typesetMath } from './math';
-import { slideHtmlMapped } from './render';
+import { deckTitles, slideHtmlMapped } from './render';
 import { applyTheme, type Theme } from './themes';
 
 // 書き出しは「見た目そのまま」を最優先する。各スライドを実寸で一度だけ描いて画像にし、
@@ -55,6 +55,7 @@ async function renderSlideCanvas(
     meta: deck.meta,
     index,
     total: deck.slides.length,
+    titles: deckTitles(deck.slides),
   });
   // 自由配置・図形(overlay)も書き出しに反映する(スライドの安定IDで紐付け)。
   const slide = root.querySelector('.slide');

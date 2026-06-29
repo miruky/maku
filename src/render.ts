@@ -382,6 +382,43 @@ export interface SlideCtx {
   meta: Record<string, string>;
   index: number;
   total: number;
+  // 目次(<!-- toc -->)スライド用。全スライドの見出し一覧(番号付き)。
+  titles?: Array<{ n: number; title: string }>;
+}
+
+// スライド本文の最初の ATX 見出し(# 〜 ######)のテキストを返す。無ければ空文字。
+function firstHeading(slide: Slide): string {
+  for (const line of slide.content.split('\n')) {
+    const m = /^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$/.exec(line);
+    if (m) return m[1]!.trim();
+  }
+  return '';
+}
+
+// 目次に載せるスライド見出しの一覧。目次スライド自身と見出しの無いスライドは除外し、
+// アジェンダとして 1 から連番を振る。書き出し・本表示・編集ステージで共通利用する。
+export function deckTitles(slides: Slide[]): Array<{ n: number; title: string }> {
+  const out: Array<{ n: number; title: string }> = [];
+  for (const s of slides) {
+    if (s.toc) continue;
+    const title = firstHeading(s);
+    if (!title) continue;
+    out.push({ n: out.length + 1, title });
+  }
+  return out;
+}
+
+// 目次スライド(<!-- toc -->)の本文。全スライドの見出しを番号付きリストで出す。
+function tocHtml(slide: Slide, ctx?: SlideCtx): string {
+  if (!slide.toc || !ctx?.titles || !ctx.titles.length) return '';
+  const items = ctx.titles
+    .map(
+      (t) =>
+        `<li class="toc-item"><span class="toc-no">${t.n}</span>` +
+        `<span class="toc-title">${inline(escapeHtml(t.title))}</span></li>`,
+    )
+    .join('');
+  return `<ol class="toc">${items}</ol>`;
 }
 
 // スライド個別 → デッキ既定 の順で解決し、ヘッダ/フッタ/ページ番号のHTMLを返す。
@@ -401,7 +438,7 @@ function slideChromeHtml(slide: Slide, ctx: SlideCtx): string {
 export function slideHtml(slide: Slide, ctx?: SlideCtx): string {
   return (
     `<div class="${slideClassName(slide)}"${slideStyleAttr(slide)}>` +
-    `<div class="slide-body">${slideInnerHtml(slide)}</div>` +
+    `<div class="slide-body">${slideInnerHtml(slide)}${tocHtml(slide, ctx)}</div>` +
     (ctx ? slideChromeHtml(slide, ctx) : '') +
     `</div>`
   );
@@ -415,7 +452,7 @@ export function slideInnerHtmlMapped(slide: Slide): string {
 export function slideHtmlMapped(slide: Slide, ctx?: SlideCtx): string {
   return (
     `<div class="${slideClassName(slide)}"${slideStyleAttr(slide)}>` +
-    `<div class="slide-body">${slideInnerHtmlMapped(slide)}</div>` +
+    `<div class="slide-body">${slideInnerHtmlMapped(slide)}${tocHtml(slide, ctx)}</div>` +
     (ctx ? slideChromeHtml(slide, ctx) : '') +
     `</div>`
   );

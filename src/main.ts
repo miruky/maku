@@ -19,7 +19,7 @@ import {
   type Shape,
   type VectorKind,
 } from './overlay';
-import { slideHtml } from './render';
+import { deckTitles, slideHtml } from './render';
 import { typesetMath } from './math';
 import { Presenter } from './present';
 import { applyTheme, DEFAULT_THEME_ID, THEMES, themeById } from './themes';
@@ -2217,7 +2217,13 @@ function doPrint(): void {
   commitEdit(); // 進行中の編集(本文/テキスト箱)を確定してから出力(古い内容で印刷しない)
   const deck = parseDeck(mdInput.value);
   const host = $('print-deck');
-  host.innerHTML = deck.slides.map((s) => `<div class="print-page">${slideHtml(s)}</div>`).join('');
+  const titles = deckTitles(deck.slides);
+  host.innerHTML = deck.slides
+    .map(
+      (s, i) =>
+        `<div class="print-page">${slideHtml(s, { meta: deck.meta, index: i, total: deck.slides.length, titles })}</div>`,
+    )
+    .join('');
   // 自由配置(テキスト/図形/画像)も印刷に反映する。
   host.querySelectorAll<HTMLElement>('.print-page > .slide').forEach((el, i) => {
     applyOverlay(el, slideOverlay(overlay, deck.slides[i]?.id ?? ''));
@@ -2346,11 +2352,13 @@ function buildOverview(): void {
   const deck = parseDeck(mdInput.value);
   const grid = $('overview-grid');
   grid.innerHTML = '';
+  const titles = deckTitles(deck.slides);
   deck.slides.forEach((s, i) => {
     const cell = document.createElement('button');
     cell.className = 'ov-cell';
     cell.style.setProperty('--i', String(i));
-    cell.innerHTML = `<div class="ov-thumb">${slideHtml(s)}</div><span class="ov-no">${i + 1}</span>`;
+    const thumbCtx = s.toc ? { meta: deck.meta, index: i, total: deck.slides.length, titles } : undefined;
+    cell.innerHTML = `<div class="ov-thumb">${slideHtml(s, thumbCtx)}</div><span class="ov-no">${i + 1}</span>`;
     const thumbSlide = cell.querySelector<HTMLElement>('.ov-thumb > .slide');
     if (thumbSlide) applyOverlay(thumbSlide, slideOverlay(overlay, s.id ?? '')); // 自由配置(テキスト/図形/画像)も一覧に出す
     cell.addEventListener('click', () => {

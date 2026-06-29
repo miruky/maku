@@ -78,6 +78,8 @@ export interface Slide {
   header?: string;
   // <!-- paginate: true|false --> でこのスライドのページ番号表示を上書き(無指定はデッキ既定)。
   paginate?: boolean;
+  // <!-- toc --> を置くと、全スライドの見出しから目次(アジェンダ)を自動生成して表示する。
+  toc?: boolean;
 }
 
 // 受理するスライド遷移の種類。
@@ -273,6 +275,7 @@ function parseSlide(raw: SourceLine[]): Slide {
   let footer: string | undefined;
   let header: string | undefined;
   let paginate: boolean | undefined;
+  let toc: boolean | undefined;
   const classes: string[] = [];
   const kept: SourceLine[] = [];
   // 単独行マーカー(<!-- key --> など)は、次に来る本文ブロックに紐づける。
@@ -298,6 +301,7 @@ function parseSlide(raw: SourceLine[]): Slide {
         setFooter: (v) => (footer = v),
         setHeader: (v) => (header = v),
         setPaginate: (v) => (paginate = v),
+        setToc: () => (toc = true),
       });
       continue;
     }
@@ -423,6 +427,7 @@ function parseSlide(raw: SourceLine[]): Slide {
     footer,
     header,
     paginate,
+    toc,
   };
 }
 
@@ -583,6 +588,7 @@ interface DirectiveSink {
   setFooter: (v: string) => void;
   setHeader: (v: string) => void;
   setPaginate: (v: boolean) => void;
+  setToc: () => void;
 }
 
 function applyDirective(body: string, sink: DirectiveSink): void {
@@ -609,5 +615,6 @@ function applyDirective(body: string, sink: DirectiveSink): void {
   const word = body.toLowerCase();
   if (word === 'incremental' || word === 'fragment') sink.setReveal('sequential');
   else if (word === 'paginate') sink.setPaginate(true);
+  else if (word === 'toc' || word === 'agenda') sink.setToc();
   else if ((LAYOUTS as string[]).includes(word)) sink.setLayout(word as Layout);
 }

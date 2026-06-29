@@ -329,6 +329,36 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* 目次(<!-- toc -->)。全スライドの見出しを番号付きで縦に並べる。本文(見出し等)の下に出る。 */
+.toc {
+  list-style: none;
+  margin: 0.4em 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55em;
+  counter-reset: none;
+}
+.toc-item {
+  display: flex;
+  align-items: baseline;
+  gap: 0.7em;
+  font-size: 1.05em;
+  line-height: 1.35;
+}
+.toc-no {
+  flex: none;
+  min-width: 1.7em;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--accent);
+  opacity: 0.9;
+}
+.toc-title {
+  color: var(--fg);
+}
+
 /* 数式(KaTeX)。ブロックは中央寄せ、横にあふれたらスクロール。インラインは行に馴染ませる。 */
 .math-block {
   display: block;

@@ -67,6 +67,12 @@ describe('parseDeck', () => {
     expect(parseDeck('# a\n<!-- paginate -->').slides[0]!.paginate).toBe(true);
   });
 
+  it('<!-- toc --> / <!-- agenda --> で目次フラグが立つ', () => {
+    expect(parseDeck('# 目次\n<!-- toc -->').slides[0]!.toc).toBe(true);
+    expect(parseDeck('# 目次\n<!-- agenda -->').slides[0]!.toc).toBe(true);
+    expect(parseDeck('# 目次').slides[0]!.toc).toBeUndefined();
+  });
+
   it('headingDivider はコードフェンス内の見出しでは割らない', () => {
     const md = '---\nheadingDivider: 1\n---\n# A\n```\n# これはコード\n```\n本文';
     const deck = parseDeck(md);
