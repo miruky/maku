@@ -132,6 +132,7 @@ body{display:grid;place-items:center}
 .deck-root{width:min(100vw,calc(100vh*var(--deck-ar-num,1.7778)));max-width:none!important;height:auto;margin:0!important;border-radius:0!important;box-shadow:none!important}
 .stage>.slide{display:none!important}
 .stage>.slide.active{display:flex!important}
+.code-copy{display:none!important}
 .maku-hint{position:fixed;left:0;right:0;bottom:8px;text-align:center;color:#888;font:12px/1.4 system-ui,sans-serif;opacity:.45;pointer-events:none}
 @media print{html,body{height:auto;overflow:visible;background:#fff}body{display:block}.deck-root{width:100%}.stage>.slide{display:flex!important;position:relative;page-break-after:always}.maku-hint{display:none}}`;
 

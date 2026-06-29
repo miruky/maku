@@ -254,6 +254,13 @@ function withSource(html: string, cur: Cursor, startLine: number): string {
 }
 
 // フェンス情報文字列(```ts title=app.ts {lineNumbers})から表示オプションを取り出す。
+// コードブロック右上のコピーボタン(クリップボード型アイコン)。contenteditable には含めない。
+const CODE_COPY_BTN =
+  '<button class="code-copy" type="button" contenteditable="false" aria-label="コードをコピー" title="コードをコピー">' +
+  '<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" focusable="false">' +
+  '<path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ' +
+  'd="M9 9h10v10H9z M5 15H4V5h10v1"/></svg></button>';
+
 function parseCodeMeta(meta: string): { title: string; lineNumbers: boolean } {
   const lineNumbers = /(^|\W)line[-_]?numbers(\W|$)/i.test(meta);
   let title = '';
@@ -289,7 +296,9 @@ function codeBlock(cur: Cursor, mark: string, lang: string, meta = ''): string {
   // 復元できるようにする(でないと編集の往復で title/行番号がソースから消える)。
   const m = meta.trim();
   const metaAttr = m ? ` data-meta="${escapeHtml(m).replace(/"/g, '&quot;')}"` : '';
-  return `<pre data-lang="${escapeHtml(lang)}"${metaAttr} class="${classes.join(' ')}">${title}${chip}${gutter}<code${langClass}>${inner}</code></pre>`;
+  // コピー用ボタン。<code> の外側なので preToMd(直接編集の往復)と書き出しテキストに影響しない。
+  // 実処理は main.ts のクリック委譲。発表中などは CSS で隠す/出すを切り替える。
+  return `<pre data-lang="${escapeHtml(lang)}"${metaAttr} class="${classes.join(' ')}">${title}${chip}${gutter}${CODE_COPY_BTN}<code${langClass}>${inner}</code></pre>`;
 }
 
 function blockquote(cur: Cursor): string {

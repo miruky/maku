@@ -586,6 +586,55 @@ body {
   color: var(--muted, #888);
 }
 
+/* コードのコピーボタン。ふだんは隠し、コードブロックにホバー/フォーカスで現れる。 */
+.code-copy {
+  position: absolute;
+  top: 0.45em;
+  right: 0.5em;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.9em;
+  height: 1.9em;
+  padding: 0;
+  border: 1px solid var(--rule);
+  border-radius: 7px;
+  background: var(--code-bg, rgba(127, 127, 127, 0.14));
+  color: var(--muted, #888);
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity 0.12s ease,
+    color 0.12s ease,
+    border-color 0.12s ease;
+}
+.slide pre:hover .code-copy,
+.code-copy:focus-visible {
+  opacity: 1;
+}
+.code-copy:hover,
+.code-copy.copied {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+/* コピーボタンが出ているときは言語チップを控えて重なりを避ける。 */
+.slide pre:hover .code-lang {
+  opacity: 0;
+}
+/* タッチ端末(ホバー無し)では薄く常時表示。 */
+@media (hover: none) {
+  .code-copy {
+    opacity: 0.55;
+  }
+}
+/* 印刷やラスタ書き出しにはコピーUIを出さない。 */
+@media print {
+  .code-copy {
+    display: none;
+  }
+}
+
 /* ── シンタックスハイライトのトークン色(themes.ts が --code-bg 上で AA を保証) ── */
 .hl-keyword,
 .hl-tag {

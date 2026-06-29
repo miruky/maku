@@ -59,6 +59,13 @@ describe('blockToMd(view → md)', () => {
     expect(blockToMd(first(md))).toBe(md);
   });
 
+  it('コピーボタン(.code-copy)は <code> 外なので往復で混入しない', () => {
+    const md = '```js\nconst a = 1;\nfn();\n```';
+    const pre = first(md);
+    expect(pre.querySelector('.code-copy')).not.toBeNull(); // 描画にはボタンがある
+    expect(blockToMd(pre)).toBe(md); // でも原文には出てこない
+  });
+
   it('数式(インライン/ブロック)を data-tex から往復で保つ', () => {
     expect(blockToMd(first('$$\nE = mc^2\n$$'))).toBe('$$\nE = mc^2\n$$');
     expect(blockToMd(first('式 $a^2$ だ'))).toBe('式 $a^2$ だ');

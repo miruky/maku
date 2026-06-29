@@ -1334,6 +1334,32 @@ let drag: {
 // 1ジェスチャ中に図形を実際に動かしたか(スワイプ移動と区別するため)。
 let draggedThisGesture = false;
 
+// コードブロックのコピーボタン。キャプチャ段でブロック選択(下の pointerdown)より先に処理する。
+// 発表中・直接編集中を問わず使え、stopPropagation で選択/編集の発火を防ぐ。
+deckRoot.addEventListener(
+  'pointerdown',
+  (e) => {
+    const btn = (e.target as HTMLElement).closest?.('.code-copy');
+    if (!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const code = btn.closest('.code-block')?.querySelector('code');
+    const text = code?.textContent ?? '';
+    if (!text) return;
+    const ok = (): void => {
+      btn.classList.add('copied');
+      setTimeout(() => btn.classList.remove('copied'), 1200);
+      toast('コードをコピーしました');
+    };
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).then(ok, () => toast('コピーできませんでした'));
+    } else {
+      toast('コピーできませんでした');
+    }
+  },
+  true,
+);
+
 deckRoot.addEventListener('pointerdown', (e) => {
   if (!liveEdit || presenting) return;
   if (e.button !== 0) return; // 右クリック等は contextmenu に任せる(選択や複数選択を壊さない)
