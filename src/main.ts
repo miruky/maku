@@ -29,7 +29,14 @@ import {
 import { deckTitles, slideHtml } from './render';
 import { typesetMath } from './math';
 import { Presenter } from './present';
-import { applyTheme, DEFAULT_THEME_ID, THEMES, themeById } from './themes';
+import {
+  applyTheme,
+  BRAND_VAR_NAMES,
+  DEFAULT_THEME_ID,
+  themeById,
+  themeOverrides,
+  THEMES,
+} from './themes';
 
 const SAMPLE = `---
 title: maku の使い方
@@ -575,6 +582,7 @@ function setTheme(id: string, persist = true): void {
   currentTheme = themeById(id);
   applyTheme(deckRoot, currentTheme);
   applyTheme($('print-deck'), currentTheme);
+  applyBrand(currentMeta); // テーマ適用で消えた accent 上書きを戻す
   if (persist) {
     try {
       localStorage.setItem('maku.theme', currentTheme.id);
@@ -592,9 +600,25 @@ function applyAspect(meta: Record<string, string>): void {
   deckRoot.style.setProperty('--deck-ar-num', String(w / h));
 }
 
+// 直近のデッキ meta(テーマ切替時にブランド色上書きを再適用するために保持)。
+let currentMeta: Record<string, string> = {};
+
+// frontmatter のブランド色上書き(accent 等)を表示・印刷に反映する。上書きが無いキーは
+// 一旦テーマ値へ戻してから適用し、前デッキの上書き残りが居座らないようにする。
+function applyBrand(meta: Record<string, string>): void {
+  const ov = themeOverrides(meta);
+  for (const el of [deckRoot, $('print-deck')]) {
+    for (const name of BRAND_VAR_NAMES) {
+      el.style.setProperty(name, ov[name] ?? currentTheme.vars[name] ?? '');
+    }
+  }
+}
+
 function rebuild(keepIndex = true): void {
   const deck = parseDeck(mdInput.value);
+  currentMeta = deck.meta;
   applyAspect(deck.meta);
+  applyBrand(deck.meta);
   // 編集での再描画(keepIndex)は入場アニメを再生しない(選択枠のズレ防止)。読み込み時のみアニメ。
   presenter.setDeck(deck, keepIndex, !keepIndex);
   barTitle.textContent = deck.meta.title ?? '';

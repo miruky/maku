@@ -3,7 +3,7 @@ import { escapeHtml } from './markdown';
 import { applyOverlay, slideOverlay, type Overlay } from './overlay';
 import { typesetMath } from './math';
 import { deckTitles, slideHtml, slideHtmlMapped } from './render';
-import { applyTheme, type Theme } from './themes';
+import { applyTheme, themeOverrides, type Theme } from './themes';
 
 // 書き出しは「見た目そのまま」を最優先する。各スライドを実寸で一度だけ描いて画像にし、
 // PDF(jsPDF)とPPTX(PptxGenJS)に敷き詰める。寸法はデッキの縦横比(既定16:9)から決める。
@@ -50,6 +50,7 @@ async function renderSlideCanvas(
   const root = document.createElement('div');
   root.style.cssText = `width:${W}px;height:${H}px;position:relative;container-type:size;overflow:hidden;`;
   applyTheme(root, theme);
+  for (const [k, v] of Object.entries(themeOverrides(deck.meta))) root.style.setProperty(k, v);
   const bg = theme.vars['--bg'] ?? '#ffffff';
   root.style.background = bg;
   root.innerHTML = slideHtmlMapped(deck.slides[index]!, {
@@ -218,6 +219,7 @@ export async function exportHtml(deck: Deck, theme: Theme, overlay?: Overlay): P
   const deckRoot = document.createElement('div');
   deckRoot.className = 'deck-root';
   applyTheme(deckRoot, theme);
+  for (const [k, v] of Object.entries(themeOverrides(deck.meta))) deckRoot.style.setProperty(k, v);
   deckRoot.style.setProperty('--deck-ar', `${w} / ${h}`);
   deckRoot.style.setProperty('--deck-ar-num', String(w / h));
   const stage = document.createElement('div');

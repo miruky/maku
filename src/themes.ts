@@ -269,3 +269,23 @@ export function applyTheme(el: HTMLElement, theme: Theme): void {
   for (const [k, v] of Object.entries(theme.vars)) el.style.setProperty(k, v);
   el.dataset.themeDark = theme.dark ? 'true' : 'false';
 }
+
+// frontmatter のブランド色上書き(現状 accent → --accent)。テーマを選んだうえで主役色だけ
+// 自社カラーに差し替える用途。値は色だけを厳格に許可し、CSS への注入を防ぐ。
+const BRAND_KEYS: Record<string, string> = { accent: '--accent' };
+// #hex(3/4/6/8桁)/ rgb()・rgba()・hsl()・hsla()/ CSS名前色(英字のみ)だけを通す。
+const BRAND_COLOR_RE =
+  /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$|^(?:rgb|rgba|hsl|hsla)\([0-9.,%/\s]+\)$|^[a-z]{3,20}$/i;
+
+// 上書きする CSS 変数名の一覧(クリア時にテーマ値へ戻すため)。
+export const BRAND_VAR_NAMES: string[] = Object.values(BRAND_KEYS);
+
+// frontmatter から CSS変数 → 値 の上書きマップを作る(妥当な色だけ。無ければ空)。
+export function themeOverrides(meta: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, varName] of Object.entries(BRAND_KEYS)) {
+    const raw = (meta[key] ?? '').trim();
+    if (raw && BRAND_COLOR_RE.test(raw)) out[varName] = raw;
+  }
+  return out;
+}

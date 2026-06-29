@@ -1,5 +1,22 @@
 import { describe, expect, it } from 'vitest';
-import { THEMES, themeById, varContrast, DEFAULT_THEME_ID } from './themes';
+import { THEMES, themeById, themeOverrides, varContrast, DEFAULT_THEME_ID } from './themes';
+
+describe('themeOverrides', () => {
+  it('accent を妥当な色のときだけ --accent に上書きする', () => {
+    expect(themeOverrides({ accent: '#e23' })).toEqual({ '--accent': '#e23' });
+    expect(themeOverrides({ accent: '#ee2233' })).toEqual({ '--accent': '#ee2233' });
+    expect(themeOverrides({ accent: 'rgb(10, 20, 30)' })).toEqual({ '--accent': 'rgb(10, 20, 30)' });
+    expect(themeOverrides({ accent: 'hsl(200 50% 40%)' })).toEqual({ '--accent': 'hsl(200 50% 40%)' });
+    expect(themeOverrides({ accent: 'rebeccapurple' })).toEqual({ '--accent': 'rebeccapurple' });
+  });
+  it('色でない/注入を狙う値は無視する', () => {
+    expect(themeOverrides({})).toEqual({});
+    expect(themeOverrides({ accent: '' })).toEqual({});
+    expect(themeOverrides({ accent: 'red; background:url(x)' })).toEqual({});
+    expect(themeOverrides({ accent: '#ax' })).toEqual({});
+    expect(themeOverrides({ accent: 'expression(alert(1))' })).toEqual({});
+  });
+});
 
 describe('THEMES', () => {
   it('ちょうど264種類ある(44系統 × 昼夜 × 3書体)', () => {
