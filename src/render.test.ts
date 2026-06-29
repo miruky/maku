@@ -166,4 +166,28 @@ describe('render', () => {
     expect(html).not.toContain('===');
     expect(html).not.toContain('<p>=</p>');
   });
+
+  it('ctx を渡すとヘッダ/フッタ/ページ番号(クローム)を付ける', () => {
+    const deck = parseDeck('---\nfooter: maku 2026\npaginate: true\nheader: 社外秘\n---\n# A\n\n---\n\n# B');
+    const html = slideHtml(deck.slides[0]!, { meta: deck.meta, index: 0, total: 2 });
+    expect(html).toContain('class="slide-footer"');
+    expect(html).toContain('maku 2026');
+    expect(html).toContain('class="slide-header"');
+    expect(html).toContain('class="slide-pageno"');
+    expect(html).toContain('1 / 2');
+  });
+
+  it('ctx なしならクロームは付かない(後方互換)', () => {
+    const deck = parseDeck('---\nfooter: x\npaginate: true\n---\n# A');
+    expect(slideHtml(deck.slides[0]!)).not.toContain('slide-footer');
+    expect(slideHtml(deck.slides[0]!)).not.toContain('slide-pageno');
+  });
+
+  it('per-slide の footer/paginate 上書きが効く', () => {
+    const deck = parseDeck('---\nfooter: 既定\npaginate: true\n---\n# A\n<!-- footer: 個別 -->\n<!-- paginate: false -->');
+    const html = slideHtml(deck.slides[0]!, { meta: deck.meta, index: 0, total: 1 });
+    expect(html).toContain('個別');
+    expect(html).not.toContain('既定');
+    expect(html).not.toContain('slide-pageno');
+  });
 });

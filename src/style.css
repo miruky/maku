@@ -300,6 +300,35 @@ body {
   overflow-wrap: anywhere;
 }
 
+/* ヘッダ/フッタ/ページ番号。本文の余白(padding)領域に控えめに置く。書き出しにも乗る。 */
+.slide-header,
+.slide-footer,
+.slide-pageno {
+  position: absolute;
+  font-family: var(--body-font);
+  font-size: 2.2cqh;
+  line-height: 1.3;
+  color: var(--muted);
+  opacity: 0.85;
+  z-index: 1;
+  pointer-events: none;
+}
+.slide-header {
+  top: 2.6cqh;
+  left: 8cqw;
+  right: 8cqw;
+}
+.slide-footer {
+  bottom: 2.6cqh;
+  left: 8cqw;
+  max-width: 70cqw;
+}
+.slide-pageno {
+  bottom: 2.6cqh;
+  right: 8cqw;
+  font-variant-numeric: tabular-nums;
+}
+
 /* 数式(KaTeX)。ブロックは中央寄せ、横にあふれたらスクロール。インラインは行に馴染ませる。 */
 .math-block {
   display: block;

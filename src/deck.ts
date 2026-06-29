@@ -73,6 +73,11 @@ export interface Slide {
   id?: string;
   // <!-- transition: fade|slide|zoom|none --> でスライド入場の演出を上書き(無指定はデッキ既定)。
   transition?: string;
+  // <!-- footer: … --> / <!-- header: … --> でこのスライドのヘッダ/フッタ文言を上書き(無指定はデッキ既定)。
+  footer?: string;
+  header?: string;
+  // <!-- paginate: true|false --> でこのスライドのページ番号表示を上書き(無指定はデッキ既定)。
+  paginate?: boolean;
 }
 
 // 受理するスライド遷移の種類。
@@ -252,6 +257,9 @@ function parseSlide(raw: SourceLine[]): Slide {
   let reveal: RevealMode = 'none';
   let slideId: string | undefined;
   let transition: string | undefined;
+  let footer: string | undefined;
+  let header: string | undefined;
+  let paginate: boolean | undefined;
   const classes: string[] = [];
   const kept: SourceLine[] = [];
   // 単独行マーカー(<!-- key --> など)は、次に来る本文ブロックに紐づける。
@@ -274,6 +282,9 @@ function parseSlide(raw: SourceLine[]): Slide {
         addClass: (c) => classes.push(c),
         setId: (v) => (slideId = v),
         setTransition: (t) => (transition = t),
+        setFooter: (v) => (footer = v),
+        setHeader: (v) => (header = v),
+        setPaginate: (v) => (paginate = v),
       });
       continue;
     }
@@ -396,6 +407,9 @@ function parseSlide(raw: SourceLine[]): Slide {
     columnLines,
     id: slideId,
     transition,
+    footer,
+    header,
+    paginate,
   };
 }
 
@@ -553,6 +567,9 @@ interface DirectiveSink {
   addClass: (c: string) => void;
   setId: (id: string) => void;
   setTransition: (t: string) => void;
+  setFooter: (v: string) => void;
+  setHeader: (v: string) => void;
+  setPaginate: (v: boolean) => void;
 }
 
 function applyDirective(body: string, sink: DirectiveSink): void {
@@ -563,7 +580,10 @@ function applyDirective(body: string, sink: DirectiveSink): void {
     if (key === 'layout' && (LAYOUTS as string[]).includes(value)) sink.setLayout(value as Layout);
     else if (key === 'transition' && (TRANSITIONS as readonly string[]).includes(value.toLowerCase())) {
       sink.setTransition(value.toLowerCase());
-    } else if (key === 'class') value.split(/\s+/).forEach((c) => sink.addClass(c));
+    } else if (key === 'footer') sink.setFooter(value);
+    else if (key === 'header') sink.setHeader(value);
+    else if (key === 'paginate') sink.setPaginate(/^(true|on|yes|1)$/i.test(value));
+    else if (key === 'class') value.split(/\s+/).forEach((c) => sink.addClass(c));
     // id は安全な文字・64字以内のみ受理(overlay 保存側の検証と対称に。長すぎ/不正は無視)。
     else if (key === 'id' && /^[\w-]{1,64}$/.test(value)) sink.setId(value);
     else if (key === 'bg' || key === 'background') sink.setBackground(value);
@@ -575,5 +595,6 @@ function applyDirective(body: string, sink: DirectiveSink): void {
   }
   const word = body.toLowerCase();
   if (word === 'incremental' || word === 'fragment') sink.setReveal('sequential');
+  else if (word === 'paginate') sink.setPaginate(true);
   else if ((LAYOUTS as string[]).includes(word)) sink.setLayout(word as Layout);
 }

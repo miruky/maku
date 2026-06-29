@@ -44,7 +44,11 @@ async function renderSlideCanvas(
   applyTheme(root, theme);
   const bg = theme.vars['--bg'] ?? '#ffffff';
   root.style.background = bg;
-  root.innerHTML = slideHtmlMapped(deck.slides[index]!);
+  root.innerHTML = slideHtmlMapped(deck.slides[index]!, {
+    meta: deck.meta,
+    index,
+    total: deck.slides.length,
+  });
   // 自由配置・図形(overlay)も書き出しに反映する(スライドの安定IDで紐付け)。
   const slide = root.querySelector('.slide');
   if (overlay && slide) applyOverlay(slide, slideOverlay(overlay, deck.slides[index]?.id ?? ''));

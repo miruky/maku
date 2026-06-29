@@ -153,7 +153,7 @@ export class Presenter {
     this.els.stage.classList.remove('enter', 'enter-back');
     if (animate) void this.els.stage.offsetWidth;
     this.els.stage.innerHTML = slide
-      ? slideHtmlMapped(slide)
+      ? slideHtmlMapped(slide, { meta: this.deck.meta, index: this.idx, total: this.total })
       : '<div class="slide"><div class="slide-body"><p class="empty">スライドがありません</p></div></div>';
     if (animate) this.els.stage.classList.add(dir === 'back' ? 'enter-back' : 'enter');
 

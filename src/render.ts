@@ -377,11 +377,32 @@ export function slideInnerHtml(slide: Slide): string {
   return renderBody(slide, false);
 }
 
-// 1枚分のスライド要素。一覧のサムネイルにも使う。
-export function slideHtml(slide: Slide): string {
+// ヘッダ/フッタ/ページ番号(クローム)用の文脈。デッキ既定(meta)とスライド個別指定を解決する。
+export interface SlideCtx {
+  meta: Record<string, string>;
+  index: number;
+  total: number;
+}
+
+// スライド個別 → デッキ既定 の順で解決し、ヘッダ/フッタ/ページ番号のHTMLを返す。
+// 本文(.slide-body)とは別レイヤなので、レイアウトや段階表示に干渉しない。書き出しにも乗る。
+function slideChromeHtml(slide: Slide, ctx: SlideCtx): string {
+  const headerText = slide.header ?? ctx.meta.header ?? '';
+  const footerText = slide.footer ?? ctx.meta.footer ?? '';
+  const paginate = slide.paginate ?? /^(true|on|yes|1)$/i.test(ctx.meta.paginate ?? '');
+  let html = '';
+  if (headerText) html += `<div class="slide-header">${inline(escapeHtml(headerText))}</div>`;
+  if (footerText) html += `<div class="slide-footer">${inline(escapeHtml(footerText))}</div>`;
+  if (paginate) html += `<div class="slide-pageno">${ctx.index + 1} / ${ctx.total}</div>`;
+  return html;
+}
+
+// 1枚分のスライド要素。一覧のサムネイルにも使う。ctx を渡すとヘッダ/フッタ/ページ番号を付ける。
+export function slideHtml(slide: Slide, ctx?: SlideCtx): string {
   return (
     `<div class="${slideClassName(slide)}"${slideStyleAttr(slide)}>` +
     `<div class="slide-body">${slideInnerHtml(slide)}</div>` +
+    (ctx ? slideChromeHtml(slide, ctx) : '') +
     `</div>`
   );
 }
@@ -391,10 +412,11 @@ export function slideInnerHtmlMapped(slide: Slide): string {
   return renderBody(slide, true);
 }
 
-export function slideHtmlMapped(slide: Slide): string {
+export function slideHtmlMapped(slide: Slide, ctx?: SlideCtx): string {
   return (
     `<div class="${slideClassName(slide)}"${slideStyleAttr(slide)}>` +
     `<div class="slide-body">${slideInnerHtmlMapped(slide)}</div>` +
+    (ctx ? slideChromeHtml(slide, ctx) : '') +
     `</div>`
   );
 }
