@@ -49,4 +49,17 @@ describe('THEMES', () => {
       expect(varContrast(t, '--fg', '--accent-soft'), `${t.id} fg/accent-soft`).toBeGreaterThanOrEqual(4.5);
     }
   });
+
+  it('全テーマでコード配色(ハイライトのトークン色)が --code-bg 上で AA を満たす', () => {
+    const tokens = [
+      '--hl-keyword', '--hl-string', '--hl-number', '--hl-function',
+      '--hl-type', '--hl-literal', '--hl-deleted', '--hl-comment', '--hl-punctuation',
+    ];
+    for (const t of THEMES) {
+      for (const key of tokens) {
+        expect(t.vars[key], `${t.id} に ${key}`).toBeTruthy();
+        expect(varContrast(t, key, '--code-bg'), `${t.id} ${key}/code-bg`).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
 });

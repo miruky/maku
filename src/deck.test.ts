@@ -21,6 +21,56 @@ describe('parseDeck', () => {
     expect(deck.slides).toHaveLength(2);
   });
 
+  it('headingDivider: 指定レベル以下の見出しでも自動分割する(--- 不要)', () => {
+    const md = '---\nheadingDivider: 2\n---\n# タイトル\n本文0\n## 章A\n本文A\n## 章B\n本文B';
+    const deck = parseDeck(md);
+    expect(deck.slides).toHaveLength(3);
+    expect(deck.slides[0]!.content).toBe('# タイトル\n本文0');
+    expect(deck.slides[1]!.content).toBe('## 章A\n本文A');
+    expect(deck.slides[2]!.content).toBe('## 章B\n本文B');
+  });
+
+  it('headingDivider はハッシュ列(##)でも数値でも受理し、レベル超の見出しでは割らない', () => {
+    const md = '---\nslideDividers: "##"\n---\n## A\n### 小見出し\n## B';
+    const deck = parseDeck(md);
+    expect(deck.slides).toHaveLength(2);
+    expect(deck.slides[0]!.content).toBe('## A\n### 小見出し');
+  });
+
+  it('headingDivider 未指定なら従来どおり --- だけで分割', () => {
+    const deck = parseDeck('# A\n## B\n## C');
+    expect(deck.slides).toHaveLength(1);
+  });
+
+  it('<!-- transition: X --> を解釈し、不正値は無視する', () => {
+    expect(parseDeck('# a\n<!-- transition: fade -->').slides[0]!.transition).toBe('fade');
+    expect(parseDeck('# a\n<!-- transition: ZOOM -->').slides[0]!.transition).toBe('zoom');
+    expect(parseDeck('# a\n<!-- transition: spin -->').slides[0]!.transition).toBeUndefined();
+    expect(parseDeck('# a').slides[0]!.transition).toBeUndefined();
+  });
+
+  it('headingDivider はコードフェンス内の見出しでは割らない', () => {
+    const md = '---\nheadingDivider: 1\n---\n# A\n```\n# これはコード\n```\n本文';
+    const deck = parseDeck(md);
+    expect(deck.slides).toHaveLength(1);
+  });
+
+  it('headingDivider: 見出し直前のディレクティブは次スライドに属する(前へ漏れない)', () => {
+    const md = '---\nheadingDivider: 2\n---\n# Title\nintro\n<!-- bg: #f00 -->\n## A\nbody';
+    const deck = parseDeck(md);
+    expect(deck.slides).toHaveLength(2);
+    expect(deck.slides[0]!.background).toBeNull();
+    expect(deck.slides[1]!.background).toBe('#f00');
+    expect(deck.slides[1]!.content).toBe('## A\nbody');
+  });
+
+  it('headingDivider: 見出し前のレイアウト指示が効く(指示だけの塊で消えない)', () => {
+    const md = '---\nheadingDivider: 1\n---\n<!-- layout: split -->\n# A\nleft\n===\nright';
+    const deck = parseDeck(md);
+    expect(deck.slides).toHaveLength(1);
+    expect(deck.slides[0]!.layout).toBe('split');
+  });
+
   it('<!-- id: xxx --> をスライドの安定IDに取り込む', () => {
     expect(parseDeck('<!-- id: abc123 -->\n# A').slides[0]!.id).toBe('abc123');
     expect(parseDeck('# A').slides[0]!.id).toBeUndefined();

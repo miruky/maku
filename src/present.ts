@@ -147,6 +147,9 @@ export class Presenter {
 
   private render(dir: 'fwd' | 'back' = 'fwd', animate = true): void {
     const slide = this.current();
+    // 入場演出の種類(スライド個別 → デッキ既定 → slide)。CSS が [data-transition] で分岐する。
+    const t = (slide?.transition ?? this.deck.meta.transition ?? 'slide').toLowerCase();
+    this.els.stage.dataset.transition = ['none', 'fade', 'slide', 'zoom'].includes(t) ? t : 'slide';
     this.els.stage.classList.remove('enter', 'enter-back');
     if (animate) void this.els.stage.offsetWidth;
     this.els.stage.innerHTML = slide

@@ -300,13 +300,40 @@ body {
   overflow-wrap: anywhere;
 }
 
-.stage.enter .slide {
-  animation: slide-in 0.4s var(--ease) both;
+/* 発表中のブラックアウト/ホワイトアウト。deckRoot を覆う(全画面でも有効)。 */
+.screen-blank {
+  position: absolute;
+  inset: 0;
+  z-index: 90;
+  cursor: pointer;
+}
+.screen-blank[data-mode='black'] {
+  background: #000;
+}
+.screen-blank[data-mode='white'] {
+  background: #fff;
 }
 
-.stage.enter-back .slide {
+/* スライド入場の演出。既定は slide(従来どおり)。data-transition で fade/zoom/none に切替。 */
+.stage.enter[data-transition='slide'] .slide,
+.stage:not([data-transition]).enter .slide {
+  animation: slide-in 0.4s var(--ease) both;
+}
+.stage.enter-back[data-transition='slide'] .slide,
+.stage:not([data-transition]).enter-back .slide {
   animation: slide-in-back 0.4s var(--ease) both;
 }
+.stage.enter[data-transition='fade'] .slide,
+.stage.enter-back[data-transition='fade'] .slide {
+  animation: fade-in 0.4s var(--ease) both;
+}
+.stage.enter[data-transition='zoom'] .slide {
+  animation: zoom-in 0.4s var(--ease) both;
+}
+.stage.enter-back[data-transition='zoom'] .slide {
+  animation: zoom-in-back 0.4s var(--ease) both;
+}
+/* data-transition='none' は一致する規則が無く、アニメーションしない(瞬時切替)。 */
 
 @keyframes slide-in {
   from {
@@ -323,6 +350,37 @@ body {
   from {
     opacity: 0;
     transform: translateX(-2.6cqw);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes zoom-in {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes zoom-in-back {
+  from {
+    opacity: 0;
+    transform: scale(1.06);
   }
   to {
     opacity: 1;
@@ -450,6 +508,87 @@ body {
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--muted, #888);
+}
+
+/* ── シンタックスハイライトのトークン色(themes.ts が --code-bg 上で AA を保証) ── */
+.hl-keyword,
+.hl-tag {
+  color: var(--hl-keyword, var(--accent));
+}
+.hl-string,
+.hl-inserted {
+  color: var(--hl-string, var(--accent));
+}
+.hl-number,
+.hl-attr {
+  color: var(--hl-number, var(--accent));
+}
+.hl-function,
+.hl-property {
+  color: var(--hl-function, var(--fg));
+}
+.hl-type {
+  color: var(--hl-type, var(--fg));
+}
+.hl-literal,
+.hl-builtin,
+.hl-meta {
+  color: var(--hl-literal, var(--accent));
+}
+.hl-deleted {
+  color: var(--hl-deleted, var(--accent));
+}
+.hl-comment {
+  color: var(--hl-comment, var(--muted));
+  font-style: italic;
+}
+.hl-operator {
+  color: var(--fg);
+  opacity: 0.85;
+}
+.hl-punctuation {
+  color: var(--hl-punctuation, var(--muted));
+}
+
+/* コードブロックのタイトル帯と行番号ガター。 */
+.code-block.has-title {
+  padding-top: 2.4em;
+}
+.code-title {
+  position: absolute;
+  inset: 0 0 auto 0;
+  font-family: var(--mono);
+  font-size: 0.62em;
+  padding: 0.55em 1.1em;
+  color: var(--muted);
+  background: rgba(127, 127, 127, 0.12);
+  border-bottom: 1px solid var(--rule);
+  border-radius: 10px 10px 0 0;
+}
+.code-block.has-ln {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 0.9em;
+}
+.code-block.has-ln > .code-title {
+  flex-basis: 100%;
+}
+.code-gutter {
+  flex: 0 0 auto;
+  font-family: var(--mono);
+  font-size: 0.78em;
+  line-height: 1.6;
+  text-align: right;
+  white-space: pre;
+  user-select: none;
+  color: var(--muted);
+  opacity: 0.55;
+  border-right: 1px solid var(--rule);
+  padding-right: 0.8em;
+}
+.code-block.has-ln > code {
+  flex: 1 1 0;
+  min-width: 0;
 }
 
 .slide blockquote {
@@ -719,6 +858,10 @@ body {
 .stage.enter .card {
   animation: card-rise 0.42s var(--ease) both;
   animation-delay: calc(var(--card-i, 0) * 60ms);
+}
+/* transition: none は瞬時切替なので、カード等のレイアウト登場アニメも止める。 */
+.stage[data-transition='none'] .card {
+  animation: none;
 }
 @keyframes card-rise {
   from {

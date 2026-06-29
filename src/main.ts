@@ -2400,6 +2400,20 @@ $('timer-reset').addEventListener('click', () => {
   $('timer-reset').blur();
 });
 
+// ── 画面ブラックアウト/ホワイトアウト(発表中の注目誘導。B=黒 / W=白) ──
+// 全画面(requestFullscreen は deck-root)でも覆えるよう deckRoot のサブツリーに置く。
+let blanked: 'black' | 'white' | null = null;
+const blankEl = document.createElement('div');
+blankEl.className = 'screen-blank';
+blankEl.hidden = true;
+deckRoot.appendChild(blankEl);
+function setBlank(mode: 'black' | 'white' | null): void {
+  blanked = mode;
+  blankEl.hidden = !mode;
+  if (mode) blankEl.dataset.mode = mode;
+}
+blankEl.addEventListener('pointerdown', () => setBlank(null));
+
 // ── キーボード ──
 const anyOverlayOpen = (): boolean =>
   !$('overview-overlay').hidden ||
@@ -2423,6 +2437,15 @@ window.addEventListener('keydown', (ev) => {
     return;
   }
   if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+
+  // ブラックアウト/ホワイトアウト中は、どのキーでも解除する(B/W は反対色への切替も可)。
+  if (blanked) {
+    ev.preventDefault();
+    if (ev.key === 'b' || ev.key === 'B') setBlank(blanked === 'black' ? null : 'black');
+    else if (ev.key === 'w' || ev.key === 'W') setBlank(blanked === 'white' ? null : 'white');
+    else setBlank(null);
+    return;
+  }
 
   // Escape(オーバーレイが無いとき): 右クリックメニュー → 全画面 → 選択解除 の順で閉じる。
   if (ev.key === 'Escape') {
@@ -2493,6 +2516,14 @@ window.addEventListener('keydown', (ev) => {
     case 's':
     case 'S':
       toggle('notes-panel');
+      return;
+    case 'b':
+    case 'B':
+      setBlank('black');
+      return;
+    case 'w':
+    case 'W':
+      setBlank('white');
       return;
   }
 

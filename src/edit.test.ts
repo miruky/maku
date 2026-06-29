@@ -54,6 +54,11 @@ describe('blockToMd(view → md)', () => {
     expect(blockToMd(first(md))).toBe(md);
   });
 
+  it('コードfenceの情報文字列(title=/lineNumbers)を往復で保つ(回帰防止)', () => {
+    const md = '```ts title=app.ts lineNumbers\nconst a = 1;\n```';
+    expect(blockToMd(first(md))).toBe(md);
+  });
+
   it('段階表示の番号バッジは本文に直列化しない', () => {
     // 回帰防止: 編集中に付く .step-badge の数字が見出し/段落に混入し Markdown が壊れていた。
     const h = first('# 表題');

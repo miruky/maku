@@ -46,7 +46,9 @@ describe('renderMarkdown', () => {
     expect(renderMarkdown('> 引用')).toContain('<blockquote>');
     const code = renderMarkdown('```ts\nconst a = 1;\n```');
     expect(code).toContain('language-ts');
-    expect(code).toContain('const a = 1;');
+    // ハイライトでトークンが span に分割されるが、タグを剥がせば元コードが復元できる。
+    expect(code.replace(/<[^>]+>/g, '')).toContain('const a = 1;');
+    expect(code).toContain('hl-keyword'); // const がキーワードとして色付く
   });
 
   it('表(配置つき)', () => {
@@ -64,6 +66,43 @@ describe('renderMarkdown', () => {
 
   it('HTMLをエスケープする', () => {
     expect(renderMarkdown('<script>')).toBe('<p>&lt;script&gt;</p>');
+  });
+
+  it(':shortcode: 絵文字を置換し、未知のものは残す', () => {
+    expect(renderMarkdown('やった :tada: :rocket:')).toContain('🎉');
+    expect(renderMarkdown('やった :tada: :rocket:')).toContain('🚀');
+    expect(renderMarkdown(':not_a_real_emoji_xyz:')).toContain(':not_a_real_emoji_xyz:');
+    // コード内のコロンは絵文字化しない(退避済み)。
+    expect(renderMarkdown('`:tada:`')).toContain(':tada:');
+  });
+
+  it('絵文字は直前が英数字なら置換しない(範囲・スコアの誤爆を防ぐ)', () => {
+    expect(renderMarkdown('比 0:100:200')).toContain('0:100:200');
+    expect(renderMarkdown('比 0:100:200')).not.toContain('💯');
+    expect(renderMarkdown('評価 5:ok:6')).toContain('5:ok:6');
+    // 空白・行頭の後では従来どおり置換する。
+    expect(renderMarkdown('完了 :100:')).toContain('💯');
+  });
+
+  it('コードfenceの情報文字列を data-meta に保存する(編集の往復で保つため)', () => {
+    const html = renderMarkdown('```ts title=app.ts lineNumbers\nconst a=1;\n```');
+    expect(html).toContain('data-meta="title=app.ts lineNumbers"');
+  });
+
+  it('画像 alt のディレクティブ(サイズ/フィルタ)を style にし、altから除く', () => {
+    const html = renderMarkdown('![ロゴ w:200 h:120 blur:4px rounded](https://e.com/a.png)');
+    expect(html).toContain('width:200px');
+    expect(html).toContain('height:120px');
+    expect(html).toContain('filter:blur(4px)');
+    expect(html).toContain('border-radius');
+    expect(html).toContain('alt="ロゴ"'); // ディレクティブ語は alt から除去
+  });
+
+  it('画像ディレクティブは不正値を弾く(CSS注入防止)', () => {
+    // 不正な値(数値でないフィルタ・不正サイズ)は style 化されず、危険なCSSは生成しない。
+    const html = renderMarkdown('![x blur:evil w:abc](https://e.com/a.png)');
+    expect(html).not.toContain('filter:');
+    expect(html).not.toContain('style=');
   });
 
   it('水平線', () => {

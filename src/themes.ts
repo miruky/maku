@@ -128,6 +128,62 @@ function lightnessForContrast(
   return 10;
 }
 
+// 暗い地色用。startL から明度を上げてコントラストを満たす最小の明度を返す。
+function lightnessForContrastUp(
+  h: number,
+  s: number,
+  bg: [number, number, number],
+  target: number,
+  startL: number,
+): number {
+  for (let l = startL; l <= 94; l += 1) {
+    if (contrastRatio(hslToRgb(h, s, l), bg) >= target) return l;
+  }
+  return 94;
+}
+
+// シンタックスハイライトのトークン色。慣習に沿った固定色相(緑=文字列・橙=数値…)で
+// 「コードらしい読みやすさ」を保ちつつ、各テーマの --code-bg に対し本文同様 AA(4.5)を
+// 保証し、昼夜に追従させる。色相を固定するのはテーマ系統に依らずコードを判読しやすくするため。
+const TOKEN_HUES: Array<[string, number, number]> = [
+  ['--hl-keyword', 330, 55],
+  ['--hl-string', 138, 48],
+  ['--hl-number', 28, 60],
+  ['--hl-function', 215, 52],
+  ['--hl-type', 178, 46],
+  ['--hl-literal', 290, 48],
+  ['--hl-deleted', 5, 55],
+];
+
+function tokenVars(f: Family, dark: boolean): Record<string, string> {
+  // hsl() は彩度を丸めて文字列化するため、コントラスト探索でも丸め後の彩度で地色を作り、
+  // 検証時(parseHsl 経由)と完全に一致させる。境界の丸め差を避けるため目標は 4.55 の余裕を持つ。
+  const T = 4.55;
+  const codeBg = dark
+    ? hslToRgb(f.hue, Math.round(f.sat * 0.6), 14)
+    : hslToRgb(f.hue, Math.round(f.sat * 0.5), 94);
+  const out: Record<string, string> = {};
+  for (const [key, hue, sat] of TOKEN_HUES) {
+    const l = dark
+      ? lightnessForContrastUp(hue, sat, codeBg, T, 58)
+      : lightnessForContrast(hue, sat, codeBg, T, 46);
+    out[key] = hsl(hue, sat, l);
+  }
+  // コメントはテーマ系統の色みを弱く残しつつ控えめに(ただし可読性のため AA は維持)。
+  const cHue = f.hue;
+  const cSat = Math.round(Math.min(f.sat * 0.35, 22));
+  out['--hl-comment'] = dark
+    ? hsl(cHue, cSat, lightnessForContrastUp(cHue, cSat, codeBg, T, 44))
+    : hsl(cHue, cSat, lightnessForContrast(cHue, cSat, codeBg, T, 50));
+  // 記号(句読点)も控えめだが --code-bg 上で AA を満たす独自色にする(--muted は --bg 基準で
+  // code-bg に対しては AA を割るテーマがあるため)。
+  const pSat = Math.round(Math.min(f.sat * 0.25, 16));
+  out['--hl-punctuation'] = dark
+    ? hsl(f.hue, pSat, lightnessForContrastUp(f.hue, pSat, codeBg, T, 50))
+    : hsl(f.hue, pSat, lightnessForContrast(f.hue, pSat, codeBg, T, 46));
+  return out;
+}
+
 function lightVars(f: Family): Record<string, string> {
   const a = Math.max(f.sat, 50);
   const bg = hslToRgb(f.hue, f.sat * 0.5, 97);
@@ -143,6 +199,7 @@ function lightVars(f: Family): Record<string, string> {
     '--accent': hsl(f.hue, a, accentL),
     '--accent-soft': hsl(f.hue, a * 0.7, 92),
     '--code-bg': hsl(f.hue, f.sat * 0.5, 94),
+    ...tokenVars(f, false),
   };
 }
 
@@ -157,6 +214,7 @@ function darkVars(f: Family): Record<string, string> {
     '--accent': hsl(f.hue, a, 66),
     '--accent-soft': hsl(f.hue, a * 0.4, 18),
     '--code-bg': hsl(f.hue, f.sat * 0.6, 14),
+    ...tokenVars(f, true),
   };
 }
 

@@ -3,6 +3,8 @@
 // HTMLは先にエスケープし、許可した記法だけを後から復元する。
 
 import type { SlideStep } from './deck';
+import { highlightCode } from './highlight';
+import { emojify } from './emoji';
 
 export function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -12,6 +14,45 @@ export function escapeHtml(s: string): string {
 // ここでは属性を抜け出せる引用符だけを潰せばよい。
 function escapeAttr(s: string): string {
   return s.replace(/"/g, '&quot;');
+}
+
+// 画像の alt 内に書いた表示ディレクティブ(w:/h:/フィルタ/rounded/shadow)を解釈する。
+// 例: ![図 w:200 h:120 blur:4px rounded](src)。値は厳格な正規表現で検証し CSS 注入を防ぐ。
+// 残りの語は alt として返す(キャプション/代替テキストを壊さない)。render 側からも使う。
+const IMG_SIZE_RE = /^\d+(?:\.\d+)?(?:px|%|em|rem|vw|vh)?$/;
+const IMG_FILTER_VAL_RE = /^-?\d+(?:\.\d+)?(?:px|%|deg|rem|em)?$/;
+const IMG_FILTERS = new Set([
+  'blur', 'brightness', 'contrast', 'grayscale', 'sepia', 'saturate', 'invert', 'opacity', 'hue-rotate',
+]);
+
+export function parseImgDirectives(alt: string): { alt: string; attrs: string } {
+  const rest: string[] = [];
+  let width = '';
+  let height = '';
+  const filters: string[] = [];
+  let rounded = false;
+  let shadow = false;
+  for (const tok of alt.split(/\s+/)) {
+    if (tok === 'rounded') { rounded = true; continue; }
+    if (tok === 'shadow') { shadow = true; continue; }
+    const m = /^([a-z-]+):(.+)$/i.exec(tok);
+    if (m) {
+      const k = m[1]!.toLowerCase();
+      const v = m[2]!;
+      if ((k === 'w' || k === 'width') && IMG_SIZE_RE.test(v)) { width = /[a-z%]/i.test(v) ? v : `${v}px`; continue; }
+      if ((k === 'h' || k === 'height') && IMG_SIZE_RE.test(v)) { height = /[a-z%]/i.test(v) ? v : `${v}px`; continue; }
+      if (IMG_FILTERS.has(k) && IMG_FILTER_VAL_RE.test(v)) { filters.push(`${k}(${v})`); continue; }
+    }
+    rest.push(tok);
+  }
+  const styles: string[] = [];
+  if (width) styles.push(`width:${width}`);
+  if (height) styles.push(`height:${height}`);
+  if (filters.length) styles.push(`filter:${filters.join(' ')}`);
+  if (rounded) styles.push('border-radius:0.5em');
+  if (shadow) styles.push('box-shadow:0 6px 22px rgba(0,0,0,0.28)');
+  const attrs = styles.length ? ` style="${styles.join(';')}"` : '';
+  return { alt: rest.join(' ').trim(), attrs };
 }
 
 // インライン記法。入力はエスケープ済みであること。
@@ -28,8 +69,9 @@ export function inline(text: string): string {
     .replace(/`([^`]+)`/g, (_m, code: string) => hold(`<code>${code}</code>`))
     .replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_m, alt: string, src: string) => {
       const safe = /^(https?:|data:)/.test(src) ? src : '';
+      const d = parseImgDirectives(alt);
       return hold(
-        `<img src="${escapeAttr(safe)}" alt="${escapeAttr(alt)}" loading="lazy" decoding="async" />`,
+        `<img src="${escapeAttr(safe)}" alt="${escapeAttr(d.alt)}" loading="lazy" decoding="async"${d.attrs} />`,
       );
     })
     // \u30EA\u30F3\u30AF\u306F\u5C5E\u6027\u90E8\u3060\u3051\u9000\u907F\u3057\u3001\u30E9\u30D9\u30EB\u306F\u5F37\u8ABF\u51E6\u7406\u3092\u52B9\u304B\u305B\u308B([**\u592A\u5B57**](url) \u7B49)\u3002
@@ -45,6 +87,8 @@ export function inline(text: string): string {
     // 語構成文字でないときだけ強調にする。語の判定は Unicode 文字・数字(\p{L}\p{N})で行い、
     // ASCII の snake_case/URL だけでなく日本語(機能_詳細_)の語中アンダースコアも斜体化しない。
     .replace(/(^|[^\p{L}\p{N}_])_([^_\s][^_]*?)_(?![\p{L}\p{N}])/gu, '$1<em>$2</em>');
+  // :shortcode: \u7D75\u6587\u5B57\u3002\u9000\u907F\u30D7\u30EC\u30FC\u30B9\u30DB\u30EB\u30C0(\uE000\u2026)\u306B\u306F\u30B3\u30ED\u30F3\u304C\u7121\u3044\u306E\u3067\u5DFB\u304D\u8FBC\u307E\u306A\u3044\u3002
+  s = emojify(s);
   for (let k = 0; k < 5 && s.includes('\uE000'); k += 1) {
     s = s.replace(/\uE000(\d+)\uE000/g, (m, i: string) => stash[Number(i)] ?? m);
   }
@@ -104,10 +148,10 @@ function blocks(cur: Cursor, minIndent: number): string {
     const startLine = cur.i;
     let piece: string;
 
-    const fence = /^(\s*)(```|~~~)\s*([\w-]*)\s*$/.exec(line);
+    const fence = /^(\s*)(```|~~~)\s*([\w-]*)\s*(.*)$/.exec(line);
     const heading = /^(#{1,6})\s+(.*)$/.exec(line);
     if (fence) {
-      piece = codeBlock(cur, fence[2]!, fence[3] ?? '');
+      piece = codeBlock(cur, fence[2]!, fence[3] ?? '', fence[4] ?? '');
     } else if (heading) {
       const level = heading[1]!.length;
       piece = `<h${level}>${inline(escapeHtml(heading[2]!.trim()))}</h${level}>`;
@@ -157,7 +201,16 @@ function withSource(html: string, cur: Cursor, startLine: number): string {
   return html.replace(/^(\s*<[a-zA-Z][\w-]*)/, `$1${attrs}`);
 }
 
-function codeBlock(cur: Cursor, mark: string, lang: string): string {
+// フェンス情報文字列(```ts title=app.ts {lineNumbers})から表示オプションを取り出す。
+function parseCodeMeta(meta: string): { title: string; lineNumbers: boolean } {
+  const lineNumbers = /(^|\W)line[-_]?numbers(\W|$)/i.test(meta);
+  let title = '';
+  const tm = /\btitle\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s}]+))/.exec(meta);
+  if (tm) title = tm[1] ?? tm[2] ?? tm[3] ?? '';
+  return { title, lineNumbers };
+}
+
+function codeBlock(cur: Cursor, mark: string, lang: string, meta = ''): string {
   cur.i += 1;
   const body: string[] = [];
   while (cur.i < cur.lines.length && !cur.lines[cur.i]!.trimStart().startsWith(mark)) {
@@ -165,9 +218,26 @@ function codeBlock(cur: Cursor, mark: string, lang: string): string {
     cur.i += 1;
   }
   if (cur.i < cur.lines.length) cur.i += 1; // 閉じフェンス
-  const cls = lang ? ` class="language-${lang}"` : '';
-  const label = lang ? `<span class="code-lang">${escapeHtml(lang)}</span>` : '';
-  return `<pre data-lang="${escapeHtml(lang)}">${label}<code${cls}>${escapeHtml(body.join('\n'))}</code></pre>`;
+  const opts = parseCodeMeta(meta);
+  // ハイライトは純粋な string→string。トークンは span、その他はエスケープ済みなので
+  // 直接編集(preToMd)は span を透過して元コードを復元でき、書き出しにもそのまま乗る。
+  const inner = highlightCode(body.join('\n'), lang);
+  const langClass = lang ? ` class="language-${lang}"` : '';
+  const classes = ['code-block'];
+  if (opts.lineNumbers) classes.push('has-ln');
+  if (opts.title) classes.push('has-title');
+  const title = opts.title ? `<div class="code-title">${escapeHtml(opts.title)}</div>` : '';
+  // 言語チップは既定表示のみ(タイトル/行番号モードでは出さず、従来の見た目を保つ)。
+  const chip = lang && !opts.title ? `<span class="code-lang">${escapeHtml(lang)}</span>` : '';
+  // 行番号はコードの実改行を保つため、独立した数値ガターとして出す(code には触れない)。
+  const gutter = opts.lineNumbers
+    ? `<span class="code-gutter" aria-hidden="true">${Array.from({ length: body.length || 1 }, (_, i) => i + 1).join('\n')}</span>`
+    : '';
+  // フェンス情報文字列(title=/lineNumbers 等)を data-meta に保存し、直接編集(preToMd)で原文へ
+  // 復元できるようにする(でないと編集の往復で title/行番号がソースから消える)。
+  const m = meta.trim();
+  const metaAttr = m ? ` data-meta="${escapeHtml(m).replace(/"/g, '&quot;')}"` : '';
+  return `<pre data-lang="${escapeHtml(lang)}"${metaAttr} class="${classes.join(' ')}">${title}${chip}${gutter}<code${langClass}>${inner}</code></pre>`;
 }
 
 function blockquote(cur: Cursor): string {
@@ -292,9 +362,9 @@ export function topLevelBlockStarts(lines: string[]): number[] {
 function consumeBlock(cur: Cursor): void {
   const before = cur.i;
   const line = cur.lines[cur.i]!;
-  const fence = /^(\s*)(```|~~~)\s*([\w-]*)\s*$/.exec(line);
+  const fence = /^(\s*)(```|~~~)\s*([\w-]*)\s*(.*)$/.exec(line);
   const heading = /^(#{1,6})\s+(.*)$/.exec(line);
-  if (fence) codeBlock(cur, fence[2]!, fence[3] ?? '');
+  if (fence) codeBlock(cur, fence[2]!, fence[3] ?? '', fence[4] ?? '');
   else if (heading) cur.i += 1;
   else if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) cur.i += 1;
   else if (/^\s*>\s?/.test(line)) blockquote(cur);

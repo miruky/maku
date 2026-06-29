@@ -71,7 +71,13 @@ export interface Slide {
   // <!-- id: xxx --> で付与する安定ID。自由配置(overlay)の図形をこのIDで紐付け、
   // スライドを並べ替え/削除しても図形が追従するようにする(無指定なら undefined)。
   id?: string;
+  // <!-- transition: fade|slide|zoom|none --> でスライド入場の演出を上書き(無指定はデッキ既定)。
+  transition?: string;
 }
+
+// 受理するスライド遷移の種類。
+export const TRANSITIONS = ['none', 'fade', 'slide', 'zoom'] as const;
+export type Transition = (typeof TRANSITIONS)[number];
 
 export interface Deck {
   meta: Record<string, string>;
@@ -154,7 +160,7 @@ export function parseDeck(source: string): Deck {
   const all = toLines(text);
   const { meta, bodyStart } = extractFrontmatter(all);
   const body = all.slice(bodyStart);
-  const chunks = splitSlides(body);
+  const chunks = splitSlides(body, headingDividerLevel(meta));
   const slides = chunks.map(parseSlide).filter((s) => s.content.trim() !== '' || s.notes !== '');
   if (slides.length === 0) {
     slides.push(parseSlide(body));
@@ -194,17 +200,47 @@ function extractFrontmatter(all: SourceLine[]): {
   return { meta, bodyStart: close + 1 };
 }
 
-function splitSlides(body: SourceLine[]): SourceLine[][] {
+// frontmatter の headingDivider / slideDividers から、スライド分割の見出しレベル(1-6)を得る。
+// "2" のような数値、または "##" のようなハッシュ列を受理する。未指定/不正は 0(分割しない)。
+function headingDividerLevel(meta: Record<string, string>): number {
+  const raw = (meta.headingdivider ?? meta.slidedividers ?? meta['heading-divider'] ?? '').trim();
+  if (!raw) return 0;
+  if (/^#+$/.test(raw)) return Math.min(raw.length, 6);
+  const n = parseInt(raw, 10);
+  return Number.isInteger(n) && n >= 1 && n <= 6 ? n : 0;
+}
+
+// 本文を単独行 --- でスライドに分割する。headingLevel>0 のときは、指定レベル以下の見出し行の
+// 直前でも新しいスライドを始める(フラットな見出しの並びを手作業の --- なしでデッキにする)。
+// コードフェンス内の --- / 見出しは分割に使わない(コード例を壊さない)。
+function splitSlides(body: SourceLine[], headingLevel = 0): SourceLine[][] {
   const out: SourceLine[][] = [];
   let buf: SourceLine[] = [];
-  const protectedLine = fenceScanner(); // コードフェンス内の --- では分割しない(幻のスライド/原文破壊を防ぐ)
+  const protectedLine = fenceScanner();
   for (const ln of body) {
-    if (!protectedLine(ln.text) && /^\s*---\s*$/.test(ln.text)) {
+    const prot = protectedLine(ln.text);
+    if (!prot && /^\s*---\s*$/.test(ln.text)) {
       out.push(buf);
       buf = [];
-    } else {
-      buf.push(ln);
+      continue;
     }
+    if (!prot && headingLevel > 0) {
+      const hm = /^(#{1,6})\s/.exec(ln.text);
+      if (hm && hm[1]!.length <= headingLevel) {
+        // 末尾の「空行＋ディレクティブ/マーカーのコメント行」は、見出しの直前に書かれた=次スライドに
+        // 属する指示なので、前スライドに残さず次のバッファへ持ち越す(手動 --- と同じ直感に合わせる)。
+        const carry: SourceLine[] = [];
+        while (buf.length) {
+          const t = buf[buf.length - 1]!.text.trim();
+          if (t === '' || /^<!--.*-->$/.test(t)) carry.unshift(buf.pop()!);
+          else break;
+        }
+        // 本文ブロックが残っているときだけ前スライドを確定する(指示だけの塊はスライドにしない)。
+        if (buf.some((l) => l.text.trim() !== '')) out.push(buf);
+        buf = carry;
+      }
+    }
+    buf.push(ln);
   }
   out.push(buf);
   return out;
@@ -215,6 +251,7 @@ function parseSlide(raw: SourceLine[]): Slide {
   let background: string | null = null;
   let reveal: RevealMode = 'none';
   let slideId: string | undefined;
+  let transition: string | undefined;
   const classes: string[] = [];
   const kept: SourceLine[] = [];
   // 単独行マーカー(<!-- key --> など)は、次に来る本文ブロックに紐づける。
@@ -236,6 +273,7 @@ function parseSlide(raw: SourceLine[]): Slide {
         setReveal: (r) => (reveal = r),
         addClass: (c) => classes.push(c),
         setId: (v) => (slideId = v),
+        setTransition: (t) => (transition = t),
       });
       continue;
     }
@@ -357,6 +395,7 @@ function parseSlide(raw: SourceLine[]): Slide {
     bodyLines,
     columnLines,
     id: slideId,
+    transition,
   };
 }
 
@@ -513,6 +552,7 @@ interface DirectiveSink {
   setReveal: (r: RevealMode) => void;
   addClass: (c: string) => void;
   setId: (id: string) => void;
+  setTransition: (t: string) => void;
 }
 
 function applyDirective(body: string, sink: DirectiveSink): void {
@@ -521,7 +561,9 @@ function applyDirective(body: string, sink: DirectiveSink): void {
     const key = kv[1]!.toLowerCase();
     const value = kv[2]!.trim();
     if (key === 'layout' && (LAYOUTS as string[]).includes(value)) sink.setLayout(value as Layout);
-    else if (key === 'class') value.split(/\s+/).forEach((c) => sink.addClass(c));
+    else if (key === 'transition' && (TRANSITIONS as readonly string[]).includes(value.toLowerCase())) {
+      sink.setTransition(value.toLowerCase());
+    } else if (key === 'class') value.split(/\s+/).forEach((c) => sink.addClass(c));
     // id は安全な文字・64字以内のみ受理(overlay 保存側の検証と対称に。長すぎ/不正は無視)。
     else if (key === 'id' && /^[\w-]{1,64}$/.test(value)) sink.setId(value);
     else if (key === 'bg' || key === 'background') sink.setBackground(value);

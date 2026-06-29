@@ -132,9 +132,11 @@ function tableToMd(table: Element): string {
 
 function preToMd(pre: Element): string {
   const lang = pre.getAttribute('data-lang') ?? '';
+  // フェンス情報文字列(title=app.ts {lineNumbers} 等)を原文へ戻す(編集の往復で失わないため)。
+  const meta = pre.getAttribute('data-meta') ?? '';
   const code = pre.querySelector('code');
   // textContent だと contenteditable が改行に入れる <div>/<br> が潰れて行が連結してしまう。
   // inlineToMd は BR/DIV/P を改行へ写すので、それで本来の改行を保つ。
   const text = code ? Array.from(code.childNodes).map(inlineToMd).join('') : '';
-  return '```' + lang + '\n' + text.replace(/\n$/, '') + '\n```';
+  return '```' + lang + (meta ? ' ' + meta : '') + '\n' + text.replace(/\n$/, '') + '\n```';
 }
