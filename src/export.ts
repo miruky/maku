@@ -1,5 +1,6 @@
 import type { Deck } from './deck';
 import { applyOverlay, slideOverlay, type Overlay } from './overlay';
+import { typesetMath } from './math';
 import { slideHtmlMapped } from './render';
 import { applyTheme, type Theme } from './themes';
 
@@ -49,6 +50,8 @@ async function renderSlideCanvas(
   if (overlay && slide) applyOverlay(slide, slideOverlay(overlay, deck.slides[index]?.id ?? ''));
   holder.appendChild(root);
   document.body.appendChild(holder);
+  // 数式を KaTeX で描画してからラスタライズする(でないと書き出しに生の TeX が出る)。
+  await typesetMath(root);
   try {
     return await html2canvas(root, {
       useCORS: true,

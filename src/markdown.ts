@@ -55,6 +55,39 @@ export function parseImgDirectives(alt: string): { alt: string; attrs: string } 
   return { alt: rest.join(' ').trim(), attrs };
 }
 
+// ── 数式(KaTeX)。コアは data-tex を持つプレースホルダを出すだけで、実際の描画は
+//    ブラウザ側(math.ts)が遅延ロードした KaTeX で行う。ここは純粋・テスト可能を保つ。──
+function unescapeEntities(s: string): string {
+  return s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+}
+
+// インライン数式。inline() は escapeHtml 済みのテキストを受け取るので、TeX 本体は実体参照を
+// 戻してから data-tex に入れる(KaTeX 用)。fallback 表示はエスケープ済みのまま残す。
+function mathInlineHtml(tex: string): string {
+  const raw = unescapeEntities(tex);
+  const safe = escapeHtml(raw);
+  return `<span class="math math-inline" data-tex="${safe.replace(/"/g, '&quot;')}">${safe}</span>`;
+}
+
+// ブロック数式。tex は生(エスケープ前)。
+function mathBlockHtml(tex: string): string {
+  const t = tex.trim();
+  const safe = escapeHtml(t);
+  return `<div class="math math-block" data-tex="${safe.replace(/"/g, '&quot;')}">${safe}</div>`;
+}
+
+// 複数行の $$ … $$ ブロックを読む(開き行で呼ぶ)。閉じ $$ までを TeX 本体にする。
+function mathBlockMulti(cur: Cursor): string {
+  cur.i += 1; // 開き $$
+  const lines: string[] = [];
+  while (cur.i < cur.lines.length && !/^\s*\$\$\s*$/.test(cur.lines[cur.i]!)) {
+    lines.push(cur.lines[cur.i]!);
+    cur.i += 1;
+  }
+  if (cur.i < cur.lines.length) cur.i += 1; // 閉じ $$
+  return mathBlockHtml(lines.join('\n'));
+}
+
 // インライン記法。入力はエスケープ済みであること。
 // コード `…` は先に取り出して退避し、リンク化・強調などに巻き込まれないようにする
 // (例: `[x](y)` の中身が誤ってリンクにならない)。最後にプレースホルダを戻す。
@@ -67,6 +100,11 @@ export function inline(text: string): string {
   let s = text
     .replace(/\uE000/g, '') // \u5165\u529B\u306B\u7D1B\u308C\u305F\u756A\u5175\u306F\u9664\u53BB(\u8AA4\u5FA9\u5143\u30FBundefined\u6DF7\u5165\u3092\u9632\u3050)
     .replace(/`([^`]+)`/g, (_m, code: string) => hold(`<code>${code}</code>`))
+    // インライン数式 $…$。通貨($5 等)の誤検出を避けるため、開き $ の直後は非空白、閉じ $ の
+    // 直前は非空白、閉じ $ の直後は数字でないこと。$$ や \$ は対象外。退避して強調記法に巻き込まない。
+    .replace(/(?<![\\$])\$(?!\s)(?:[^\n$])+?(?<!\s)\$(?!\d)/g, (m: string) =>
+      hold(mathInlineHtml(m.slice(1, -1))),
+    )
     .replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_m, alt: string, src: string) => {
       const safe = /^(https?:|data:)/.test(src) ? src : '';
       const d = parseImgDirectives(alt);
@@ -149,9 +187,15 @@ function blocks(cur: Cursor, minIndent: number): string {
     let piece: string;
 
     const fence = /^(\s*)(```|~~~)\s*([\w-]*)\s*(.*)$/.exec(line);
+    const mathSingle = /^\s*\$\$(.+?)\$\$\s*$/.exec(line);
     const heading = /^(#{1,6})\s+(.*)$/.exec(line);
     if (fence) {
       piece = codeBlock(cur, fence[2]!, fence[3] ?? '', fence[4] ?? '');
+    } else if (mathSingle) {
+      piece = mathBlockHtml(mathSingle[1]!);
+      cur.i += 1;
+    } else if (/^\s*\$\$\s*$/.test(line)) {
+      piece = mathBlockMulti(cur);
     } else if (heading) {
       const level = heading[1]!.length;
       piece = `<h${level}>${inline(escapeHtml(heading[2]!.trim()))}</h${level}>`;
@@ -331,6 +375,7 @@ function paragraph(cur: Cursor, minIndent: number): string {
       /^\s*>\s?/.test(line) ||
       LIST_RE.test(line) ||
       /^(\s*)(```|~~~)/.test(line) ||
+      /^\s*\$\$/.test(line) ||
       /^\s*([-*_])(\s*\1){2,}\s*$/.test(line)
     ) {
       break;
@@ -363,8 +408,11 @@ function consumeBlock(cur: Cursor): void {
   const before = cur.i;
   const line = cur.lines[cur.i]!;
   const fence = /^(\s*)(```|~~~)\s*([\w-]*)\s*(.*)$/.exec(line);
+  const mathSingle = /^\s*\$\$(.+?)\$\$\s*$/.test(line);
   const heading = /^(#{1,6})\s+(.*)$/.exec(line);
   if (fence) codeBlock(cur, fence[2]!, fence[3] ?? '', fence[4] ?? '');
+  else if (mathSingle) cur.i += 1;
+  else if (/^\s*\$\$\s*$/.test(line)) mathBlockMulti(cur);
   else if (heading) cur.i += 1;
   else if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) cur.i += 1;
   else if (/^\s*>\s?/.test(line)) blockquote(cur);

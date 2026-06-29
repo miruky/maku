@@ -20,6 +20,7 @@ import {
   type VectorKind,
 } from './overlay';
 import { slideHtml } from './render';
+import { typesetMath } from './math';
 import { Presenter } from './present';
 import { applyTheme, DEFAULT_THEME_ID, THEMES, themeById } from './themes';
 
@@ -1831,6 +1832,9 @@ insertBar.addEventListener('click', (e) => {
 
 // 描画のたびに編集の見た目と選択枠を更新する(Presenter から onAfterRender 経由)。
 function decorateStage(): void {
+  // 数式があれば遅延ロードした KaTeX で描画する(描画済みは skip するので毎回呼んでよい)。
+  void typesetMath(stage);
+  void typesetMath($('notes-body'));
   const enable = liveEdit && !presenting;
   presenter.setAuthoring(enable);
   deckRoot.classList.toggle('live', enable);

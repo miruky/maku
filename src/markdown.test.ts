@@ -89,6 +89,29 @@ describe('renderMarkdown', () => {
     expect(html).toContain('data-meta="title=app.ts lineNumbers"');
   });
 
+  it('インライン数式 $…$ を data-tex プレースホルダにする', () => {
+    const html = renderMarkdown('式は $a^2 + b^2$ です');
+    expect(html).toContain('class="math math-inline"');
+    expect(html).toContain('data-tex="a^2 + b^2"');
+  });
+
+  it('通貨など $ は数式化しない($5 / $5 and $10)', () => {
+    expect(renderMarkdown('価格は $5 です')).not.toContain('data-tex');
+    expect(renderMarkdown('$5 and $10')).not.toContain('data-tex');
+  });
+
+  it('インライン数式の < は data-tex で生TeXに戻す(KaTeX 用)', () => {
+    const html = renderMarkdown('$a < b$');
+    expect(html).toContain('data-tex="a &lt; b"'); // 属性内は &lt; だが getAttribute で a < b に戻る
+  });
+
+  it('ブロック数式 $$…$$ (単一行/複数行)を math-block にする', () => {
+    expect(renderMarkdown('$$ E = mc^2 $$')).toContain('class="math math-block"');
+    const multi = renderMarkdown('$$\n\\int_0^1 x\\,dx\n$$');
+    expect(multi).toContain('class="math math-block"');
+    expect(multi).toContain('data-tex="\\int_0^1 x\\,dx"');
+  });
+
   it('画像 alt のディレクティブ(サイズ/フィルタ)を style にし、altから除く', () => {
     const html = renderMarkdown('![ロゴ w:200 h:120 blur:4px rounded](https://e.com/a.png)');
     expect(html).toContain('width:200px');

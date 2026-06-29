@@ -59,6 +59,11 @@ describe('blockToMd(view → md)', () => {
     expect(blockToMd(first(md))).toBe(md);
   });
 
+  it('数式(インライン/ブロック)を data-tex から往復で保つ', () => {
+    expect(blockToMd(first('$$\nE = mc^2\n$$'))).toBe('$$\nE = mc^2\n$$');
+    expect(blockToMd(first('式 $a^2$ だ'))).toBe('式 $a^2$ だ');
+  });
+
   it('段階表示の番号バッジは本文に直列化しない', () => {
     // 回帰防止: 編集中に付く .step-badge の数字が見出し/段落に混入し Markdown が壊れていた。
     const h = first('# 表題');

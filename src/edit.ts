@@ -12,6 +12,8 @@ export function inlineToMd(node: Node): string {
   const el = node as Element;
   // 段階表示の番号バッジなど、本文ではないオーバーレイ用要素は無視する(誤って直列化しない)。
   if (el.classList.contains('step-badge')) return '';
+  // 数式は KaTeX 描画後に中身が別物になるため、元の TeX(data-tex)から $…$ を復元する。
+  if (el.classList.contains('math-inline')) return '$' + (el.getAttribute('data-tex') ?? '') + '$';
   const kids = (): string => Array.from(el.childNodes).map(inlineToMd).join('');
   switch (el.tagName) {
     case 'BR':
@@ -48,6 +50,8 @@ function inlineChildren(el: Element): string {
 // 描画済みのブロック要素1つを、対応するMarkdownへ戻す。
 export function blockToMd(el: Element): string {
   const tag = el.tagName;
+  // ブロック数式は data-tex から $$…$$ を復元(KaTeX 描画後の中身を直列化しない)。
+  if (el.classList.contains('math-block')) return '$$\n' + (el.getAttribute('data-tex') ?? '') + '\n$$';
   if (/^H[1-6]$/.test(tag)) {
     const level = Number(tag[1]);
     return '#'.repeat(level) + ' ' + inlineChildren(el).trim();

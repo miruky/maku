@@ -300,6 +300,23 @@ body {
   overflow-wrap: anywhere;
 }
 
+/* 数式(KaTeX)。ブロックは中央寄せ、横にあふれたらスクロール。インラインは行に馴染ませる。 */
+.math-block {
+  display: block;
+  text-align: center;
+  margin: 0.5em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.math-inline {
+  white-space: nowrap;
+}
+/* KaTeX 未ロード/失敗時の生 TeX フォールバックは等幅で控えめに見せる。 */
+.math:not([data-tex-done]) {
+  font-family: var(--mono);
+  opacity: 0.85;
+}
+
 /* 発表中のブラックアウト/ホワイトアウト。deckRoot を覆う(全画面でも有効)。 */
 .screen-blank {
   position: absolute;
