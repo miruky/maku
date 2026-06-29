@@ -393,6 +393,8 @@ theme: ai-hiru-mincho
             <dt>E</dt><dd>Markdown エディタ</dd>
             <dt>T</dt><dd>テーマ選択</dd>
             <dt>P</dt><dd>書き出し</dd>
+            <dt>B / W</dt><dd>画面を黒 / 白で覆う(注目誘導。もう一度で戻る)</dd>
+            <dt>A</dt><dd>自動送り(キオスク)の一時停止 / 再開 ※ frontmatter に autoslide</dd>
             <dt>?</dt><dd>このヘルプ</dd>
             <dt>Esc</dt><dd>開いているダイアログ / 全画面 / 図形選択を閉じる(編集パネル・ノートは E / S で切替)</dd>
             <dt>矢印 / Shift+矢印</dt><dd>選択中の図形を微調整 / 大きく</dd>
@@ -1891,7 +1893,12 @@ document.addEventListener('fullscreenchange', () => {
   if (presenting) {
     commitEdit();
     deselect();
-    if (!wasPresenting) presenter.resetSteps(); // 発表開始時は現在スライドを先頭ステップから
+    if (!wasPresenting) {
+      presenter.resetSteps(); // 発表開始時は現在スライドを先頭ステップから
+      if (presenter.hasAutoAdvance) presenter.setAutoPlay(true); // キオスク自動送りを開始
+    }
+  } else if (wasPresenting) {
+    presenter.setAutoPlay(false); // 発表終了で自動送りを止める
   }
   decorateStage();
 });
@@ -1916,7 +1923,12 @@ function fauxFull(on: boolean): void {
   if (on) {
     commitEdit();
     deselect();
-    if (!was) presenter.resetSteps(); // 発表開始時は現在スライドを先頭ステップから
+    if (!was) {
+      presenter.resetSteps(); // 発表開始時は現在スライドを先頭ステップから
+      if (presenter.hasAutoAdvance) presenter.setAutoPlay(true); // キオスク自動送りを開始
+    }
+  } else if (was) {
+    presenter.setAutoPlay(false); // 発表終了で自動送りを止める
   }
   decorateStage();
 }
@@ -2545,6 +2557,18 @@ window.addEventListener('keydown', (ev) => {
     case 'W':
       setBlank('white');
       return;
+    case 'a':
+    case 'A': {
+      // 自動送り(キオスク)の一時停止/再開。設定が無いデッキでは案内だけ出す。
+      if (!presenter.hasAutoAdvance) {
+        toast('自動送りは未設定です(frontmatter に autoslide: 5 など)');
+        return;
+      }
+      const on = !presenter.autoPlaying;
+      presenter.setAutoPlay(on);
+      toast(on ? '自動送りを再開しました' : '自動送りを一時停止しました');
+      return;
+    }
   }
 
   // 以下のオーサリング系(編集パネル・テーマ・書き出し)は発表中は止める(発表の邪魔をしない)。

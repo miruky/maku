@@ -1,4 +1,4 @@
-import type { Deck, Slide } from './deck';
+import { parseAutoslideMs, type Deck, type Slide } from './deck';
 import { renderMarkdown } from './markdown';
 import { deckTitles, slideHtml, slideHtmlMapped } from './render';
 
@@ -19,6 +19,11 @@ export class Presenter {
   private step = 1;
   // 編集中(authoring)は段階表示で隠さず全て見せる。発表/閲覧時のみ実際に段階表示する。
   private authoring = false;
+  // 自動送り(キオスク)。autoOn のとき、各スライド/ステップを slideMs() 後に進める。
+  private autoOn = false;
+  private deckAutoMs = 0; // frontmatter autoslide(ms、0=無効)
+  private loop = false; // frontmatter loop。末尾で先頭へ戻る
+  private autoTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private readonly els: PresenterEls,
@@ -38,6 +43,8 @@ export class Presenter {
 
   setDeck(deck: Deck, keepIndex = true, animate = false): void {
     this.deck = deck;
+    this.deckAutoMs = parseAutoslideMs(deck.meta.autoslide ?? deck.meta.autoadvance ?? '') ?? 0;
+    this.loop = /^(true|on|yes|1)$/i.test(deck.meta.loop ?? '');
     const max = Math.max(0, deck.slides.length - 1);
     this.idx = keepIndex ? Math.min(this.idx, max) : 0;
     this.step = 1;
@@ -128,6 +135,54 @@ export class Presenter {
       el.classList.toggle('frag-past', active && keyFirst && s > 0 && s < this.step);
     }
     this.updateAux();
+    this.scheduleAuto();
+  }
+
+  // ── 自動送り(キオスク) ──
+  // 自動送りの ON/OFF。発表開始/終了時に main から呼ぶほか、'A' キーで切り替える。
+  setAutoPlay(on: boolean): void {
+    this.autoOn = on;
+    this.scheduleAuto();
+  }
+  get autoPlaying(): boolean {
+    return this.autoOn;
+  }
+  // このデッキで自動送りが設定されているか(frontmatter か、いずれかのスライドに autoslide)。
+  get hasAutoAdvance(): boolean {
+    return this.deckAutoMs > 0 || this.deck.slides.some((s) => (s.autoslide ?? 0) > 0);
+  }
+
+  // 現在スライドの待ち時間(ms)。個別指定が優先(0=このスライドは送らない)、無指定はデッキ既定。
+  private slideMs(): number {
+    const per = this.current()?.autoslide;
+    return per !== undefined ? per : this.deckAutoMs;
+  }
+
+  // 次の自動送りを予約し直す。applySteps から呼ぶので、手動移動でもタイマーが再起動する。
+  private scheduleAuto(): void {
+    if (this.autoTimer !== null) {
+      clearTimeout(this.autoTimer);
+      this.autoTimer = null;
+    }
+    if (!this.autoOn || this.authoring) return;
+    const ms = this.slideMs();
+    if (!(ms > 0)) return; // このスライドは自動送りしない
+    this.autoTimer = setTimeout(() => {
+      this.autoTimer = null;
+      this.autoTick();
+    }, ms);
+  }
+
+  // タイマー発火時の進行。スライド末尾かつデッキ末尾なら loop で先頭へ、でなければ停止。
+  private autoTick(): void {
+    const atSlideEnd = this.authoring || this.step >= this.maxStep();
+    const atDeckEnd = this.idx >= this.total - 1;
+    if (atDeckEnd && atSlideEnd) {
+      if (this.loop) this.go(0);
+      else this.setAutoPlay(false); // 末尾で停止(無駄打ちしない)
+      return;
+    }
+    this.next(); // applySteps 経由で次のタイマーを予約
   }
 
   // 発表者ノートの補助表示(次スライドのプレビュー / 現スライドのステップ進捗)を更新する。

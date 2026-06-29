@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { deckRatio, parseDeck, setBlockMarker, stripRevealDirectiveLines } from './deck';
+import {
+  deckRatio,
+  parseAutoslideMs,
+  parseDeck,
+  setBlockMarker,
+  stripRevealDirectiveLines,
+} from './deck';
 
 describe('parseDeck', () => {
   it('フロントマターを読み、本文から除く', () => {
@@ -71,6 +77,14 @@ describe('parseDeck', () => {
     expect(parseDeck('# 目次\n<!-- toc -->').slides[0]!.toc).toBe(true);
     expect(parseDeck('# 目次\n<!-- agenda -->').slides[0]!.toc).toBe(true);
     expect(parseDeck('# 目次').slides[0]!.toc).toBeUndefined();
+  });
+
+  it('<!-- autoslide: N --> でスライド個別の自動送り時間(ms)を持つ', () => {
+    expect(parseDeck('# a\n<!-- autoslide: 5 -->').slides[0]!.autoslide).toBe(5000);
+    expect(parseDeck('# a\n<!-- autoslide: 500ms -->').slides[0]!.autoslide).toBe(500);
+    expect(parseDeck('# a\n<!-- autoslide: off -->').slides[0]!.autoslide).toBe(0);
+    expect(parseDeck('# a\n<!-- autoslide: zzz -->').slides[0]!.autoslide).toBeUndefined();
+    expect(parseDeck('# a').slides[0]!.autoslide).toBeUndefined();
   });
 
   it('headingDivider はコードフェンス内の見出しでは割らない', () => {
@@ -261,6 +275,23 @@ describe('parseDeck', () => {
     expect(s.columns).toHaveLength(1);
     expect(s.columns!.join('\n')).not.toContain('===');
     expect(s.reveal).toBe('sequential');
+  });
+});
+
+describe('parseAutoslideMs', () => {
+  it('既定は秒、ms 接尾辞は ms として読む', () => {
+    expect(parseAutoslideMs('5')).toBe(5000);
+    expect(parseAutoslideMs('5s')).toBe(5000);
+    expect(parseAutoslideMs('2.5')).toBe(2500);
+    expect(parseAutoslideMs('750ms')).toBe(750);
+  });
+  it('off/none/0 は 0(停止)、空・不正は undefined', () => {
+    expect(parseAutoslideMs('off')).toBe(0);
+    expect(parseAutoslideMs('none')).toBe(0);
+    expect(parseAutoslideMs('0')).toBe(0);
+    expect(parseAutoslideMs('')).toBeUndefined();
+    expect(parseAutoslideMs('fast')).toBeUndefined();
+    expect(parseAutoslideMs('5x')).toBeUndefined();
   });
 });
 

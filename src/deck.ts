@@ -80,6 +80,8 @@ export interface Slide {
   paginate?: boolean;
   // <!-- toc --> を置くと、全スライドの見出しから目次(アジェンダ)を自動生成して表示する。
   toc?: boolean;
+  // <!-- autoslide: 5 --> でこのスライドの自動送り待ち時間(ms)を上書き。0 はこのスライドで停止。
+  autoslide?: number;
 }
 
 // 受理するスライド遷移の種類。
@@ -97,6 +99,20 @@ export function deckRatio(meta: Record<string, string>): { w: number; h: number 
     if (w > 0 && h > 0 && Number.isFinite(w) && Number.isFinite(h)) return { w, h };
   }
   return { w: 16, h: 9 };
+}
+
+// 自動送り(キオスク)の待ち時間をミリ秒で返す。"5"/"5s" → 5000、"500ms" → 500、
+// "off"/"none"/"0" → 0(このスライドは自動送りしない)、不正値 → undefined(無指定扱い)。
+// 既定の単位は秒(利用者が秒で考えられるように)。frontmatter と <!-- autoslide --> で共有。
+export function parseAutoslideMs(value: string): number | undefined {
+  const v = value.trim().toLowerCase();
+  if (v === '' ) return undefined;
+  if (v === 'off' || v === 'none' || v === 'no' || v === 'false') return 0;
+  const m = /^(\d+(?:\.\d+)?)\s*(ms|s)?$/.exec(v);
+  if (!m) return undefined;
+  const n = Number(m[1]);
+  if (!Number.isFinite(n)) return undefined;
+  return m[2] === 'ms' ? Math.round(n) : Math.round(n * 1000);
 }
 
 export interface Deck {
@@ -276,6 +292,7 @@ function parseSlide(raw: SourceLine[]): Slide {
   let header: string | undefined;
   let paginate: boolean | undefined;
   let toc: boolean | undefined;
+  let autoslide: number | undefined;
   const classes: string[] = [];
   const kept: SourceLine[] = [];
   // 単独行マーカー(<!-- key --> など)は、次に来る本文ブロックに紐づける。
@@ -302,6 +319,7 @@ function parseSlide(raw: SourceLine[]): Slide {
         setHeader: (v) => (header = v),
         setPaginate: (v) => (paginate = v),
         setToc: () => (toc = true),
+        setAutoslide: (ms) => (autoslide = ms),
       });
       continue;
     }
@@ -428,6 +446,7 @@ function parseSlide(raw: SourceLine[]): Slide {
     header,
     paginate,
     toc,
+    autoslide,
   };
 }
 
@@ -589,6 +608,7 @@ interface DirectiveSink {
   setHeader: (v: string) => void;
   setPaginate: (v: boolean) => void;
   setToc: () => void;
+  setAutoslide: (ms: number) => void;
 }
 
 function applyDirective(body: string, sink: DirectiveSink): void {
@@ -602,6 +622,10 @@ function applyDirective(body: string, sink: DirectiveSink): void {
     } else if (key === 'footer') sink.setFooter(value);
     else if (key === 'header') sink.setHeader(value);
     else if (key === 'paginate') sink.setPaginate(/^(true|on|yes|1)$/i.test(value));
+    else if (key === 'autoslide' || key === 'autoadvance') {
+      const ms = parseAutoslideMs(value);
+      if (ms !== undefined) sink.setAutoslide(ms);
+    }
     else if (key === 'class') value.split(/\s+/).forEach((c) => sink.addClass(c));
     // id は安全な文字・64字以内のみ受理(overlay 保存側の検証と対称に。長すぎ/不正は無視)。
     else if (key === 'id' && /^[\w-]{1,64}$/.test(value)) sink.setId(value);
