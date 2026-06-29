@@ -112,6 +112,16 @@ describe('renderMarkdown', () => {
     expect(multi).toContain('data-tex="\\int_0^1 x\\,dx"');
   });
 
+  // 退行防止: 「$$」で始まり同一行で閉じない行(入力途中など)が無限ループにならない。
+  it('開き行に式がある/閉じない $$ でもハングせず math-block を返す', () => {
+    for (const src of ['$$x', '$$ x', '$$E=mc^2', '$$\\frac{1}{2}\n$$', '$$x\n$$']) {
+      const html = renderMarkdown(src);
+      expect(html).toContain('class="math math-block"');
+    }
+    // 開き行の式が最初の TeX 行として拾われる
+    expect(renderMarkdown('$$E=mc^2\n$$')).toContain('data-tex="E=mc^2"');
+  });
+
   it('画像 alt のディレクティブ(サイズ/フィルタ)を style にし、altから除く', () => {
     const html = renderMarkdown('![ロゴ w:200 h:120 blur:4px rounded](https://e.com/a.png)');
     expect(html).toContain('width:200px');

@@ -194,8 +194,17 @@ export class Presenter {
     }
     if (this.els.next) {
       const nx = this.deck.slides[this.idx + 1];
+      // 次が目次スライドのときはプレビューにも目次を出す(本表示と一致させる)。
+      const nxCtx = nx
+        ? {
+            meta: this.deck.meta,
+            index: this.idx + 1,
+            total: this.total,
+            titles: nx.toc ? deckTitles(this.deck.slides) : undefined,
+          }
+        : undefined;
       this.els.next.innerHTML = nx
-        ? `<div class="np-label">次のスライド (${this.idx + 2} / ${this.total})</div><div class="np-thumb">${slideHtml(nx)}</div>`
+        ? `<div class="np-label">次のスライド (${this.idx + 2} / ${this.total})</div><div class="np-thumb">${slideHtml(nx, nxCtx)}</div>`
         : '<div class="np-label np-end">これが最後のスライドです</div>';
     }
   }

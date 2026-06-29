@@ -237,4 +237,18 @@ describe('目次(TOC)', () => {
     expect(html).toContain('<code>code</code>');
     expect(html).not.toContain('<script');
   });
+
+  it('コードフェンス内の # 行は目次に拾わない(描画と一致)', () => {
+    const md = '# 目次\n<!-- toc -->\n\n---\n\n```python\n# config setup\n```\n\n---\n\n# 本物の見出し';
+    const deck = parseDeck(md);
+    const titles = deckTitles(deck.slides);
+    // フェンスだけのスライドは見出し無し扱いで除外、本物の見出しだけ残る
+    expect(titles).toEqual([{ n: 1, title: '本物の見出し' }]);
+  });
+
+  it('見出し抽出は描画と同じ規則(行頭・末尾の # は残す)', () => {
+    const deck = parseDeck('<!-- toc -->\n# 目次\n\n---\n\n# Foo #');
+    const titles = deckTitles(deck.slides);
+    expect(titles).toEqual([{ n: 1, title: 'Foo #' }]);
+  });
 });

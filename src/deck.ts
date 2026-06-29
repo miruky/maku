@@ -163,7 +163,7 @@ const FLOW_FALLBACK_LAYOUTS: Layout[] = ['split', 'grid'];
 // フェンスの内側)」を返す判定器を作る。CommonMark に倣い、開いたフェンスは同じ文字種・開始以上の
 // 長さの行でのみ閉じる。スライド分割・ディレクティブ解析・GUI のディレクティブ除去で同じ規則を共有し、
 // 「コード例の中の --- や <!-- ... --> を区切り/指示と誤解しない」挙動を一致させる。
-function fenceScanner(): (text: string) => boolean {
+export function fenceScanner(): (text: string) => boolean {
   const re = /^[ \t]*(`{3,}|~{3,})/;
   let open: { ch: string; len: number } | null = null;
   return (text) => {

@@ -2391,7 +2391,8 @@ function buildOverview(): void {
     const cell = document.createElement('button');
     cell.className = 'ov-cell';
     cell.style.setProperty('--i', String(i));
-    const thumbCtx = s.toc ? { meta: deck.meta, index: i, total: deck.slides.length, titles } : undefined;
+    // 一覧でも本表示と同じクローム(ヘッダ/フッタ/ページ番号)と目次を出す(全スライド一律)。
+    const thumbCtx = { meta: deck.meta, index: i, total: deck.slides.length, titles };
     cell.innerHTML = `<div class="ov-thumb">${slideHtml(s, thumbCtx)}</div><span class="ov-no">${i + 1}</span>`;
     const thumbSlide = cell.querySelector<HTMLElement>('.ov-thumb > .slide');
     if (thumbSlide) applyOverlay(thumbSlide, slideOverlay(overlay, s.id ?? '')); // 自由配置(テキスト/図形/画像)も一覧に出す
@@ -2457,14 +2458,24 @@ $('timer-reset').addEventListener('click', () => {
 // ── 画面ブラックアウト/ホワイトアウト(発表中の注目誘導。B=黒 / W=白) ──
 // 全画面(requestFullscreen は deck-root)でも覆えるよう deckRoot のサブツリーに置く。
 let blanked: 'black' | 'white' | null = null;
+let autoPlayBeforeBlank = false; // 暗転前に自動送りが動いていたか(復帰時に戻す)
 const blankEl = document.createElement('div');
 blankEl.className = 'screen-blank';
 blankEl.hidden = true;
 deckRoot.appendChild(blankEl);
 function setBlank(mode: 'black' | 'white' | null): void {
+  const wasBlank = blanked !== null;
   blanked = mode;
   blankEl.hidden = !mode;
   if (mode) blankEl.dataset.mode = mode;
+  // 暗転/白転の間は自動送り(キオスク)を止め、解除したら元の状態に戻す。
+  if (mode && !wasBlank) {
+    autoPlayBeforeBlank = presenter.autoPlaying;
+    if (autoPlayBeforeBlank) presenter.setAutoPlay(false);
+  } else if (!mode && wasBlank && autoPlayBeforeBlank) {
+    presenter.setAutoPlay(true);
+    autoPlayBeforeBlank = false;
+  }
 }
 blankEl.addEventListener('pointerdown', () => setBlank(null));
 
@@ -2584,6 +2595,11 @@ window.addEventListener('keydown', (ev) => {
       // 自動送り(キオスク)の一時停止/再開。設定が無いデッキでは案内だけ出す。
       if (!presenter.hasAutoAdvance) {
         toast('自動送りは未設定です(frontmatter に autoslide: 5 など)');
+        return;
+      }
+      // 直接編集中(発表外)はタイマーが動かないので、誤解を招くトーストを出さず案内する。
+      if (!presenting && liveEdit) {
+        toast('自動送りは発表中(F)に動きます');
         return;
       }
       const on = !presenter.autoPlaying;

@@ -141,6 +141,45 @@ addEventListener('keydown',function(e){if(e.key==='ArrowRight'||e.key===' '||e.k
 addEventListener('click',function(e){if(e.target.closest('a'))return;show(i+1)});
 var m=(location.hash||'').match(/\\d+/);show(m?+m[0]-1:0)})();`;
 
+// Uint8Array を base64 へ(大きいフォントでもスタックを溢れさせないよう分割して変換)。
+function bytesToBase64(bytes: Uint8Array): string {
+  let bin = '';
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(bin);
+}
+
+// CSS 中の woff2 フォント url() を data: URI に焼き込む(数式=KaTeX を含むときだけ実際に走る)。
+// KaTeX の @font-face は woff2/woff/ttf を持つが、現代ブラウザは woff2 を優先するため
+// woff2 だけ埋め込めば、配布された単体HTMLでもオフラインで数式グリフが正しく出る。
+async function inlineFontFiles(css: string): Promise<string> {
+  const re = /url\(\s*(['"]?)([^'"()]+)\1\s*\)/gi;
+  const urls = new Set<string>();
+  for (let m = re.exec(css); m; m = re.exec(css)) {
+    if (/\.woff2(\?|$)/i.test(m[2]!)) urls.add(m[2]!);
+  }
+  if (urls.size === 0) return css;
+  const map = new Map<string, string>();
+  await Promise.all(
+    [...urls].map(async (u) => {
+      try {
+        const res = await fetch(u);
+        if (!res.ok) return;
+        const buf = new Uint8Array(await res.arrayBuffer());
+        map.set(u, `data:font/woff2;base64,${bytesToBase64(buf)}`);
+      } catch {
+        /* 取得不可(オフライン書き出し等)なら元の url を残す */
+      }
+    }),
+  );
+  return css.replace(re, (whole: string, _q: string, url: string) => {
+    const data = map.get(url);
+    return data ? `url(${data})` : whole;
+  });
+}
+
 // アプリが読み込んでいる全スタイルシートの本文を集める(同一オリジンのみ。失敗分は黙ってスキップ)。
 function collectAppCss(): string {
   let out = '';
@@ -203,7 +242,8 @@ export async function exportHtml(deck: Deck, theme: Theme, overlay?: Overlay): P
     // 先頭スライドを表示状態にしておく(ビューアJSが無効でも1枚は見える)。
     slideEls[0]?.classList.add('active');
     const bodyHtml = deckRoot.outerHTML;
-    const appCss = collectAppCss();
+    // 数式フォント(KaTeX woff2)を焼き込み、配布先・オフラインでもグリフが崩れないようにする。
+    const appCss = await inlineFontFiles(collectAppCss());
     return buildStandaloneHtml({ title: deck.meta.title ?? '', appCss, bodyHtml });
   } finally {
     holder.remove();

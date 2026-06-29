@@ -1,4 +1,4 @@
-import type { Slide } from './deck';
+import { fenceScanner, type Slide } from './deck';
 import { escapeHtml, inline, renderMarkdown, renderMarkdownMapped } from './markdown';
 
 export function slideClassName(slide: Slide): string {
@@ -387,10 +387,15 @@ export interface SlideCtx {
 }
 
 // スライド本文の最初の ATX 見出し(# 〜 ######)のテキストを返す。無ければ空文字。
+// コードフェンス内の `#` 行は見出しとみなさない(fenceScanner で本文と一致させる)。
+// 見出し判定は実際の描画(markdown.ts の /^(#{1,6})\s+(.*)$/)と同じ規則にそろえる。
 function firstHeading(slide: Slide): string {
+  const protectedLine = fenceScanner();
   for (const line of slide.content.split('\n')) {
-    const m = /^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$/.exec(line);
-    if (m) return m[1]!.trim();
+    const prot = protectedLine(line);
+    if (prot) continue; // フェンス区切り/フェンス内は対象外
+    const m = /^(#{1,6})\s+(.*)$/.exec(line);
+    if (m) return m[2]!.trim();
   }
   return '';
 }

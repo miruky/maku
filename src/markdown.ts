@@ -77,9 +77,13 @@ function mathBlockHtml(tex: string): string {
 }
 
 // 複数行の $$ … $$ ブロックを読む(開き行で呼ぶ)。閉じ $$ までを TeX 本体にする。
+// 開き行に「$$」より後ろの文字があれば($$E=mc^2 のような書き方)最初の TeX 行として拾う。
+// これにより「$$」で始まるが同一行で閉じない行も必ず消費され、blocks() の無限ループを防ぐ。
 function mathBlockMulti(cur: Cursor): string {
+  const head = cur.lines[cur.i]!.replace(/^\s*\$\$/, '');
   cur.i += 1; // 開き $$
   const lines: string[] = [];
+  if (head.trim() !== '') lines.push(head);
   while (cur.i < cur.lines.length && !/^\s*\$\$\s*$/.test(cur.lines[cur.i]!)) {
     lines.push(cur.lines[cur.i]!);
     cur.i += 1;
@@ -194,7 +198,8 @@ function blocks(cur: Cursor, minIndent: number): string {
     } else if (mathSingle) {
       piece = mathBlockHtml(mathSingle[1]!);
       cur.i += 1;
-    } else if (/^\s*\$\$\s*$/.test(line)) {
+    } else if (/^\s*\$\$/.test(line)) {
+      // 「$$」で始まり同一行で閉じない行はすべて複数行ブロックの開きとみなす($$x など)。
       piece = mathBlockMulti(cur);
     } else if (heading) {
       const level = heading[1]!.length;
@@ -213,6 +218,9 @@ function blocks(cur: Cursor, minIndent: number): string {
       piece = paragraph(cur, minIndent);
     }
 
+    // どの分岐も必ずカーソルを進める前提だが、将来の追加で進まない分岐が出ても
+    // ここで1行進めて無限ループを防ぐ(consumeBlock と対称の安全弁)。
+    if (cur.i === startLine) cur.i += 1;
     // トップレベル(offsets あり)のときだけ、ブロックの元ソース範囲を埋め込む。
     // 入れ子(blockquote 内など)は offsets を持たないので付かない。
     if (cur.offsets) piece = withSource(piece, cur, startLine);
@@ -412,7 +420,7 @@ function consumeBlock(cur: Cursor): void {
   const heading = /^(#{1,6})\s+(.*)$/.exec(line);
   if (fence) codeBlock(cur, fence[2]!, fence[3] ?? '', fence[4] ?? '');
   else if (mathSingle) cur.i += 1;
-  else if (/^\s*\$\$\s*$/.test(line)) mathBlockMulti(cur);
+  else if (/^\s*\$\$/.test(line)) mathBlockMulti(cur);
   else if (heading) cur.i += 1;
   else if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) cur.i += 1;
   else if (/^\s*>\s?/.test(line)) blockquote(cur);
