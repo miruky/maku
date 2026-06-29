@@ -1,7 +1,8 @@
 import { deckRatio, type Deck } from './deck';
+import { escapeHtml } from './markdown';
 import { applyOverlay, slideOverlay, type Overlay } from './overlay';
 import { typesetMath } from './math';
-import { deckTitles, slideHtmlMapped } from './render';
+import { deckTitles, slideHtml, slideHtmlMapped } from './render';
 import { applyTheme, type Theme } from './themes';
 
 // 書き出しは「見た目そのまま」を最優先する。各スライドを実寸で一度だけ描いて画像にし、
@@ -117,6 +118,96 @@ export async function renderSlidePng(
   const html2canvas = h2c.default as unknown as Html2Canvas;
   const canvas = await renderSlideCanvas(deck, theme, index, html2canvas, W, H, overlay);
   return canvas.toDataURL('image/png');
+}
+
+// ── 単体HTML書き出し(サーバー不要で配布できる1ファイル) ──
+// アプリの全CSS + テーマ変数 + 描画済みスライド + 最小ビューアJS を1つの .html に詰める。
+// 画像/数式は埋め込み済みなら同梱され、オフラインでも矢印キー/クリックでめくれる。
+
+// ビューア固有のCSS。アプリCSSの後に置いて、配布用の全画面表示・1枚ずつ表示へ上書きする。
+const VIEWER_CSS = `*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:#0a0a0a;overflow:hidden}
+body{display:grid;place-items:center}
+.deck-root{width:min(100vw,calc(100vh*var(--deck-ar-num,1.7778)));max-width:none!important;height:auto;margin:0!important;border-radius:0!important;box-shadow:none!important}
+.stage>.slide{display:none!important}
+.stage>.slide.active{display:flex!important}
+.maku-hint{position:fixed;left:0;right:0;bottom:8px;text-align:center;color:#888;font:12px/1.4 system-ui,sans-serif;opacity:.45;pointer-events:none}
+@media print{html,body{height:auto;overflow:visible;background:#fff}body{display:block}.deck-root{width:100%}.stage>.slide{display:flex!important;position:relative;page-break-after:always}.maku-hint{display:none}}`;
+
+// 配布物に埋め込む最小ビューア。1枚ずつ表示し、←/→/Space/クリック/Home/End/F・#番号で操作する。
+const VIEWER_JS = `(function(){var w=[].slice.call(document.querySelectorAll('.stage>.slide')),i=0;
+function show(n){i=Math.max(0,Math.min(w.length-1,n));w.forEach(function(s,k){s.classList.toggle('active',k===i)});if(location.hash!=='#'+(i+1))history.replaceState(null,'','#'+(i+1))}
+addEventListener('keydown',function(e){if(e.key==='ArrowRight'||e.key===' '||e.key==='PageDown'){show(i+1);e.preventDefault()}else if(e.key==='ArrowLeft'||e.key==='PageUp'){show(i-1)}else if(e.key==='Home'){show(0)}else if(e.key==='End'){show(w.length-1)}else if(e.key==='f'||e.key==='F'){var d=document;if(!d.fullscreenElement){(d.documentElement.requestFullscreen||function(){})()}else{(d.exitFullscreen||function(){}).call(d)}}});
+addEventListener('click',function(e){if(e.target.closest('a'))return;show(i+1)});
+var m=(location.hash||'').match(/\\d+/);show(m?+m[0]-1:0)})();`;
+
+// アプリが読み込んでいる全スタイルシートの本文を集める(同一オリジンのみ。失敗分は黙ってスキップ)。
+function collectAppCss(): string {
+  let out = '';
+  for (const sheet of Array.from(document.styleSheets)) {
+    let rules: CSSRuleList | null = null;
+    try {
+      rules = sheet.cssRules;
+    } catch {
+      rules = null; // クロスオリジン等で読めないシートは飛ばす
+    }
+    if (rules) for (const r of Array.from(rules)) out += r.cssText + '\n';
+  }
+  return out;
+}
+
+// 配布用 HTML 文書を組み立てる(純粋関数=テスト可能)。bodyHtml は描画済みの .deck-root。
+export function buildStandaloneHtml(opts: { title: string; appCss: string; bodyHtml: string }): string {
+  const title = escapeHtml(opts.title || 'slides');
+  return (
+    `<!doctype html>\n<html lang="ja">\n<head>\n` +
+    `<meta charset="utf-8">\n` +
+    `<meta name="viewport" content="width=device-width,initial-scale=1">\n` +
+    `<title>${title}</title>\n` +
+    `<style>\n${opts.appCss}\n${VIEWER_CSS}\n</style>\n` +
+    `</head>\n<body>\n${opts.bodyHtml}\n` +
+    `<div class="maku-hint">← / → ・クリックでめくる ・F で全画面</div>\n` +
+    `<script>${VIEWER_JS}</script>\n</body>\n</html>\n`
+  );
+}
+
+// 現在のデッキを単体HTML文字列にする。数式・自由配置(overlay)も埋め込んで配布できる形にする。
+export async function exportHtml(deck: Deck, theme: Theme, overlay?: Overlay): Promise<string> {
+  const { w, h } = deckRatio(deck.meta);
+  const holder = document.createElement('div');
+  holder.style.cssText = 'position:fixed;left:-99999px;top:0;';
+  const deckRoot = document.createElement('div');
+  deckRoot.className = 'deck-root';
+  applyTheme(deckRoot, theme);
+  deckRoot.style.setProperty('--deck-ar', `${w} / ${h}`);
+  deckRoot.style.setProperty('--deck-ar-num', String(w / h));
+  const stage = document.createElement('div');
+  stage.className = 'stage';
+  const titles = deckTitles(deck.slides);
+  stage.innerHTML = deck.slides
+    .map((s, i) =>
+      slideHtml(s, { meta: deck.meta, index: i, total: deck.slides.length, titles }),
+    )
+    .join('');
+  deckRoot.appendChild(stage);
+  holder.appendChild(deckRoot);
+  document.body.appendChild(holder);
+  try {
+    // 数式を KaTeX で描画して焼き込む(KaTeX の CSS もこの後 collectAppCss で拾われる)。
+    await typesetMath(stage);
+    // 自由配置(テキスト/図形/画像)をスライドの安定IDで焼き込む。
+    const slideEls = stage.querySelectorAll<HTMLElement>('.slide');
+    if (overlay) {
+      slideEls.forEach((el, i) => applyOverlay(el, slideOverlay(overlay, deck.slides[i]?.id ?? '')));
+    }
+    // 先頭スライドを表示状態にしておく(ビューアJSが無効でも1枚は見える)。
+    slideEls[0]?.classList.add('active');
+    const bodyHtml = deckRoot.outerHTML;
+    const appCss = collectAppCss();
+    return buildStandaloneHtml({ title: deck.meta.title ?? '', appCss, bodyHtml });
+  } finally {
+    holder.remove();
+  }
 }
 
 export async function exportPptx(

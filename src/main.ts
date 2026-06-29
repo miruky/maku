@@ -1,7 +1,14 @@
 import './style.css';
 import { deckRatio, deleteStartWithMarkers, parseDeck, setBlockMarker, stripRevealDirectiveLines, type BlockMarker, type RevealMode } from './deck';
 import { blockToMd } from './edit';
-import { deckFilename, exportPdf, exportPptx, renderSlidePng, slideImageName } from './export';
+import {
+  deckFilename,
+  exportHtml,
+  exportPdf,
+  exportPptx,
+  renderSlidePng,
+  slideImageName,
+} from './export';
 import {
   applyOverlay,
   clampBox,
@@ -434,6 +441,7 @@ theme: ai-hiru-mincho
     <button data-export="pptx">PowerPoint (.pptx)</button>
     <button data-export="gslides">Google スライド用に書き出す</button>
     <button data-export="png">現在のスライドを画像で保存 (.png)</button>
+    <button data-export="html">単体HTML(配布用・サーバー不要)</button>
     <button data-export="md">Markdown を保存</button>
     <button data-export="print">ブラウザで印刷</button>
   </div>
@@ -2189,6 +2197,20 @@ async function runExport(kind: string): Promise<void> {
   if (kind === 'md') {
     download(`${deckFilename(deck.meta)}.md`, mdInput.value, 'text/markdown');
     toast('Markdown を保存しました');
+    return;
+  }
+  if (kind === 'html') {
+    setBusy(true, 'HTML を作成中…', 0, 1);
+    try {
+      const html = await exportHtml(deck, currentTheme, overlay);
+      download(`${deckFilename(deck.meta)}.html`, html, 'text/html');
+      toast('単体HTML を書き出しました(ダブルクリックで再生)');
+    } catch (err) {
+      toast('HTML の書き出しに失敗しました');
+      console.error(err);
+    } finally {
+      setBusy(false);
+    }
     return;
   }
   if (kind === 'png') {
