@@ -1,4 +1,5 @@
 import { deckRatio, type Deck } from './deck';
+import { fitSlideBody } from './fit';
 import { escapeHtml } from './markdown';
 import { applyOverlay, slideOverlay, type Overlay } from './overlay';
 import { typesetMath } from './math';
@@ -69,6 +70,8 @@ async function renderSlideCanvas(
   document.body.appendChild(holder);
   // 数式を KaTeX で描画してからラスタライズする(でないと書き出しに生の TeX が出る)。
   await typesetMath(root);
+  // はみ出す本文は枠に収める(画面表示と同じ縮小をラスタ書き出しにも適用)。
+  if (slide instanceof HTMLElement) fitSlideBody(slide);
   try {
     return await html2canvas(root, {
       useCORS: true,
@@ -218,6 +221,7 @@ export function buildStandaloneHtml(opts: { title: string; appCss: string; bodyH
 // 現在のデッキを単体HTML文字列にする。数式・自由配置(overlay)も埋め込んで配布できる形にする。
 export async function exportHtml(deck: Deck, theme: Theme, overlay?: Overlay): Promise<string> {
   const { w, h } = deckRatio(deck.meta);
+  const { W, H } = dims(deck);
   const holder = document.createElement('div');
   holder.style.cssText = 'position:fixed;left:-99999px;top:0;';
   const deckRoot = document.createElement('div');
@@ -226,6 +230,9 @@ export async function exportHtml(deck: Deck, theme: Theme, overlay?: Overlay): P
   for (const [k, v] of Object.entries(themeOverrides(deck.meta))) deckRoot.style.setProperty(k, v);
   deckRoot.style.setProperty('--deck-ar', `${w} / ${h}`);
   deckRoot.style.setProperty('--deck-ar-num', String(w / h));
+  // 計測用に実寸を与える(はみ出し縮小の判定に必要)。焼き込み前に外すのでビューア表示には残さない。
+  deckRoot.style.width = `${W}px`;
+  deckRoot.style.height = `${H}px`;
   const stage = document.createElement('div');
   stage.className = 'stage';
   const titles = deckTitles(deck.slides);
@@ -249,6 +256,11 @@ export async function exportHtml(deck: Deck, theme: Theme, overlay?: Overlay): P
     slideEls[0]?.classList.add('active');
     // 配布物にはコピーボタンの実体を残さない(ビューアJSが無く機能しないため。CSSでも保険)。
     deckRoot.querySelectorAll('.code-copy').forEach((b) => b.remove());
+    // はみ出す本文は枠に収める(縮小率はサイズ非依存なのでビューアの表示サイズでも有効)。
+    slideEls.forEach((el) => fitSlideBody(el));
+    // 計測用の実寸インラインは外す(ビューア側の応答的サイズ調整を妨げないため)。
+    deckRoot.style.width = '';
+    deckRoot.style.height = '';
     const bodyHtml = deckRoot.outerHTML;
     // 数式フォント(KaTeX woff2)を焼き込み、配布先・オフラインでもグリフが崩れないようにする。
     const appCss = await inlineFontFiles(collectAppCss());

@@ -1,4 +1,5 @@
 import { parseAutoslideMs, type Deck, type Slide } from './deck';
+import { clearFit, fitSlideBody } from './fit';
 import { renderMarkdown } from './markdown';
 import { deckTitles, slideHtml, slideHtmlMapped } from './render';
 
@@ -61,6 +62,16 @@ export class Presenter {
     // 発表へ復帰したスライドが途中状態(全表示のまま)で始まらないようにする。
     this.step = this.minStep();
     this.applySteps();
+    // 直接編集中は素のサイズ(選択枠・バッジの座標が合うように)、発表/閲覧時は枠に収める。
+    this.fitCurrent();
+  }
+
+  // 現在スライドの本文を、編集中でなければ枠に収まるよう縮小する(はみ出し対策)。
+  private fitCurrent(): void {
+    const slideEl = this.els.stage.querySelector<HTMLElement>('.slide');
+    if (!slideEl) return;
+    if (this.authoring) clearFit(slideEl);
+    else fitSlideBody(slideEl);
   }
 
   // 現在スライドの段階表示を先頭へ戻す(発表開始時に呼ぶ。閲覧中に進めた途中状態で始めない)。
@@ -227,6 +238,7 @@ export class Presenter {
     if (animate) this.els.stage.classList.add(dir === 'back' ? 'enter-back' : 'enter');
 
     this.applySteps();
+    this.fitCurrent();
     const pct = this.total ? ((this.idx + 1) / this.total) * 100 : 0;
     this.els.progress.style.width = `${pct}%`;
     this.els.counter.textContent = `${this.total ? this.idx + 1 : 0} / ${this.total}`;
