@@ -66,6 +66,11 @@ export class Presenter {
     this.fitCurrent();
   }
 
+  // 数式/図などの遅延描画でレイアウトが変わった後に、収まり直しを再計算する(外部から呼ぶ)。
+  refit(): void {
+    this.fitCurrent();
+  }
+
   // 現在スライドの本文を、編集中でなければ枠に収まるよう縮小する(はみ出し対策)。
   private fitCurrent(): void {
     const slideEl = this.els.stage.querySelector<HTMLElement>('.slide');

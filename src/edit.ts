@@ -52,6 +52,9 @@ export function blockToMd(el: Element): string {
   const tag = el.tagName;
   // ブロック数式は data-tex から $$…$$ を復元(KaTeX 描画後の中身を直列化しない)。
   if (el.classList.contains('math-block')) return '$$\n' + (el.getAttribute('data-tex') ?? '') + '\n$$';
+  // Mermaid 図は data-mermaid から ```mermaid フェンスを復元(SVG描画後の中身を直列化しない)。
+  if (el.classList.contains('mermaid-block'))
+    return '```mermaid\n' + (el.getAttribute('data-mermaid') ?? '') + '\n```';
   if (/^H[1-6]$/.test(tag)) {
     const level = Number(tag[1]);
     return '#'.repeat(level) + ' ' + inlineChildren(el).trim();

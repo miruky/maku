@@ -122,6 +122,20 @@ describe('renderMarkdown', () => {
     expect(renderMarkdown('$$E=mc^2\n$$')).toContain('data-tex="E=mc^2"');
   });
 
+  it('```mermaid は図ブロック(.mermaid-block + data-mermaid)にし、ハイライトしない', () => {
+    const html = renderMarkdown('```mermaid\ngraph TD\nA-->B\n```');
+    expect(html).toContain('class="mermaid-block"');
+    expect(html).toContain('data-mermaid="graph TD');
+    expect(html).not.toContain('code-block'); // 通常のコードブロックにはしない
+    expect(html).toContain('graph TD'); // 描画前のフォールバックに生ソースが残る
+  });
+
+  it('mermaid のソースは属性へHTMLエスケープして入れる(注入防止)', () => {
+    const html = renderMarkdown('```mermaid\nA["<b>x</b>"]\n```');
+    expect(html).toContain('&lt;b&gt;');
+    expect(html).not.toContain('<b>x</b>');
+  });
+
   it('画像 alt のディレクティブ(サイズ/フィルタ)を style にし、altから除く', () => {
     const html = renderMarkdown('![ロゴ w:200 h:120 blur:4px rounded](https://e.com/a.png)');
     expect(html).toContain('width:200px');

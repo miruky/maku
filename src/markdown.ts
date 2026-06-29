@@ -269,6 +269,14 @@ function parseCodeMeta(meta: string): { title: string; lineNumbers: boolean } {
   return { title, lineNumbers };
 }
 
+// Mermaid 図ブロック。data-mermaid に原文を持たせ、mermaid.ts が SVG に描画する。
+// <code> ではないので preToMd は触れず、編集の往復は blockToMd が data-mermaid から復元する。
+// 描画前は生ソースを等幅で控えめに見せる(空白にしない / 失敗時もこれが残る)。
+function mermaidBlockHtml(src: string): string {
+  const safe = escapeHtml(src);
+  return `<div class="mermaid-block" data-mermaid="${safe.replace(/"/g, '&quot;')}"><pre class="mermaid-src">${safe}</pre></div>`;
+}
+
 function codeBlock(cur: Cursor, mark: string, lang: string, meta = ''): string {
   cur.i += 1;
   const body: string[] = [];
@@ -277,6 +285,8 @@ function codeBlock(cur: Cursor, mark: string, lang: string, meta = ''): string {
     cur.i += 1;
   }
   if (cur.i < cur.lines.length) cur.i += 1; // 閉じフェンス
+  // ```mermaid は図として扱う(ハイライトせず、mermaid.ts が SVG 描画)。
+  if (lang.toLowerCase() === 'mermaid') return mermaidBlockHtml(body.join('\n'));
   const opts = parseCodeMeta(meta);
   // ハイライトは純粋な string→string。トークンは span、その他はエスケープ済みなので
   // 直接編集(preToMd)は span を透過して元コードを復元でき、書き出しにもそのまま乗る。

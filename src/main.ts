@@ -28,6 +28,7 @@ import {
 } from './overlay';
 import { deckTitles, slideHtml } from './render';
 import { typesetMath } from './math';
+import { typesetMermaid } from './mermaid';
 import { Presenter } from './present';
 import {
   applyTheme,
@@ -1900,9 +1901,10 @@ insertBar.addEventListener('click', (e) => {
 
 // 描画のたびに編集の見た目と選択枠を更新する(Presenter から onAfterRender 経由)。
 function decorateStage(): void {
-  // 数式があれば遅延ロードした KaTeX で描画する(描画済みは skip するので毎回呼んでよい)。
-  void typesetMath(stage);
+  // 数式・図は遅延ロードして描画する(描画済みは skip するので毎回呼んでよい)。
+  // 描画でレイアウト(高さ)が変わるため、終わったら収まり直し(refit)を再計算する。
   void typesetMath($('notes-body'));
+  void Promise.all([typesetMath(stage), typesetMermaid(stage)]).then(() => presenter.refit());
   const enable = liveEdit && !presenting;
   presenter.setAuthoring(enable);
   deckRoot.classList.toggle('live', enable);

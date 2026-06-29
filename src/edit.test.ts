@@ -71,6 +71,13 @@ describe('blockToMd(view → md)', () => {
     expect(blockToMd(first('式 $a^2$ だ'))).toBe('式 $a^2$ だ');
   });
 
+  it('Mermaid 図を data-mermaid から ```mermaid 往復で保つ', () => {
+    const md = '```mermaid\ngraph TD\n  A-->B\n```';
+    const block = first(md);
+    expect(block.classList.contains('mermaid-block')).toBe(true);
+    expect(blockToMd(block)).toBe(md);
+  });
+
   it('段階表示の番号バッジは本文に直列化しない', () => {
     // 回帰防止: 編集中に付く .step-badge の数字が見出し/段落に混入し Markdown が壊れていた。
     const h = first('# 表題');

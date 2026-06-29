@@ -1,6 +1,7 @@
 import { deckRatio, type Deck } from './deck';
 import { fitSlideBody } from './fit';
 import { escapeHtml } from './markdown';
+import { typesetMermaid } from './mermaid';
 import { applyOverlay, slideOverlay, type Overlay } from './overlay';
 import { typesetMath } from './math';
 import { deckTitles, slideHtml, slideHtmlMapped } from './render';
@@ -68,8 +69,9 @@ async function renderSlideCanvas(
   if (overlay && slide) applyOverlay(slide, slideOverlay(overlay, deck.slides[index]?.id ?? ''));
   holder.appendChild(root);
   document.body.appendChild(holder);
-  // 数式を KaTeX で描画してからラスタライズする(でないと書き出しに生の TeX が出る)。
+  // 数式・図を描画してからラスタライズする(でないと書き出しに生の TeX / ソースが出る)。
   await typesetMath(root);
+  await typesetMermaid(root);
   // はみ出す本文は枠に収める(画面表示と同じ縮小をラスタ書き出しにも適用)。
   if (slide instanceof HTMLElement) fitSlideBody(slide);
   try {
@@ -245,8 +247,9 @@ export async function exportHtml(deck: Deck, theme: Theme, overlay?: Overlay): P
   holder.appendChild(deckRoot);
   document.body.appendChild(holder);
   try {
-    // 数式を KaTeX で描画して焼き込む(KaTeX の CSS もこの後 collectAppCss で拾われる)。
+    // 数式・図を描画して焼き込む(KaTeX の CSS もこの後 collectAppCss で拾われる。Mermaid は SVG)。
     await typesetMath(stage);
+    await typesetMermaid(stage);
     // 自由配置(テキスト/図形/画像)をスライドの安定IDで焼き込む。
     const slideEls = stage.querySelectorAll<HTMLElement>('.slide');
     if (overlay) {

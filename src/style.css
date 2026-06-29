@@ -376,6 +376,26 @@ body {
   opacity: 0.85;
 }
 
+/* Mermaid 図。中央寄せで枠に収める。描画後の SVG は幅・高さを枠に合わせる。 */
+.mermaid-block {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin: 0.4em 0;
+}
+.mermaid-block svg {
+  max-width: 100%;
+  height: auto;
+}
+/* 描画前/失敗時のフォールバック(生ソース)は等幅で控えめに(成功時は SVG に置換され消える)。 */
+.mermaid-src {
+  font-family: var(--mono);
+  font-size: 0.72em;
+  white-space: pre-wrap;
+  opacity: 0.8;
+  margin: 0;
+}
+
 /* 発表中のブラックアウト/ホワイトアウト。deckRoot を覆う(全画面でも有効)。 */
 .screen-blank {
   position: absolute;
