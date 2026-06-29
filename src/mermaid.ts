@@ -31,6 +31,21 @@ export function hasPendingMermaid(root: ParentNode): boolean {
   return !!root.querySelector('.mermaid-block:not([data-mermaid-done])');
 }
 
+// 描画済みの図を未描画状態(生ソースのフォールバック)へ戻す。Mermaid は配色を SVG に焼き込むため、
+// 明暗テーマを切り替えたら描き直す必要がある(その前段でこれを呼んで再 typeset する)。
+export function resetMermaid(root: ParentNode): void {
+  for (const el of root.querySelectorAll<HTMLElement>('.mermaid-block[data-mermaid-done]')) {
+    const src = el.getAttribute('data-mermaid') ?? '';
+    el.classList.remove('mermaid-error');
+    el.removeAttribute('data-mermaid-done');
+    el.textContent = ''; // 中身(旧SVG)を消す
+    const pre = document.createElement('pre');
+    pre.className = 'mermaid-src';
+    pre.textContent = src; // textContent なので自動エスケープ
+    el.appendChild(pre);
+  }
+}
+
 // root 配下の Mermaid ブロックを SVG に描画する。べき等(描画済みは skip)。
 export async function typesetMermaid(root: ParentNode): Promise<void> {
   const blocks = Array.from(

@@ -28,7 +28,7 @@ import {
 } from './overlay';
 import { deckTitles, slideHtml } from './render';
 import { typesetMath } from './math';
-import { typesetMermaid } from './mermaid';
+import { resetMermaid, typesetMermaid } from './mermaid';
 import { Presenter } from './present';
 import {
   applyTheme,
@@ -580,10 +580,16 @@ function urlFor(slide1: number): string {
 }
 
 function setTheme(id: string, persist = true): void {
+  const prevDark = currentTheme.dark;
   currentTheme = themeById(id);
   applyTheme(deckRoot, currentTheme);
   applyTheme($('print-deck'), currentTheme);
   applyBrand(currentMeta); // テーマ適用で消えた accent 上書きを戻す
+  // Mermaid は配色を SVG に焼き込むため、明暗が変わったら描き直す(CSS変数では追従できない)。
+  if (currentTheme.dark !== prevDark) {
+    resetMermaid(stage);
+    void typesetMermaid(stage).then(() => presenter.refit());
+  }
   if (persist) {
     try {
       localStorage.setItem('maku.theme', currentTheme.id);
@@ -1904,6 +1910,7 @@ function decorateStage(): void {
   // 数式・図は遅延ロードして描画する(描画済みは skip するので毎回呼んでよい)。
   // 描画でレイアウト(高さ)が変わるため、終わったら収まり直し(refit)を再計算する。
   void typesetMath($('notes-body'));
+  void typesetMermaid($('notes-body')); // 発表者ノート内の Mermaid 図も描画する
   void Promise.all([typesetMath(stage), typesetMermaid(stage)]).then(() => presenter.refit());
   const enable = liveEdit && !presenting;
   presenter.setAuthoring(enable);
