@@ -1,5 +1,5 @@
 import './style.css';
-import { deleteStartWithMarkers, parseDeck, setBlockMarker, stripRevealDirectiveLines, type BlockMarker, type RevealMode } from './deck';
+import { deckRatio, deleteStartWithMarkers, parseDeck, setBlockMarker, stripRevealDirectiveLines, type BlockMarker, type RevealMode } from './deck';
 import { blockToMd } from './edit';
 import { deckFilename, exportPdf, exportPptx, renderSlidePng, slideImageName } from './export';
 import {
@@ -575,8 +575,16 @@ function setTheme(id: string, persist = true): void {
   }
 }
 
+// デッキの縦横比(frontmatter size/ratio)を deck-root の CSS 変数に反映する。既定は 16:9。
+function applyAspect(meta: Record<string, string>): void {
+  const { w, h } = deckRatio(meta);
+  deckRoot.style.setProperty('--deck-ar', `${w} / ${h}`);
+  deckRoot.style.setProperty('--deck-ar-num', String(w / h));
+}
+
 function rebuild(keepIndex = true): void {
   const deck = parseDeck(mdInput.value);
+  applyAspect(deck.meta);
   // 編集での再描画(keepIndex)は入場アニメを再生しない(選択枠のズレ防止)。読み込み時のみアニメ。
   presenter.setDeck(deck, keepIndex, !keepIndex);
   barTitle.textContent = deck.meta.title ?? '';

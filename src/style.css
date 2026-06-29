@@ -264,8 +264,8 @@ body {
 .deck-root {
   position: relative;
   width: 100%;
-  max-width: calc((100vh - 200px) * 16 / 9);
-  aspect-ratio: 16 / 9;
+  max-width: calc((100vh - 200px) * var(--deck-ar-num, 1.7778));
+  aspect-ratio: var(--deck-ar, 16 / 9);
   background: var(--bg, #fff);
   color: var(--fg, #111);
   border-radius: var(--r-lg);

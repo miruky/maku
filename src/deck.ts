@@ -84,6 +84,19 @@ export interface Slide {
 export const TRANSITIONS = ['none', 'fade', 'slide', 'zoom'] as const;
 export type Transition = (typeof TRANSITIONS)[number];
 
+// frontmatter の size:/ratio:/aspect: からデッキの縦横比を得る。"16:9"・"4:3"・"16x9"・
+// "1920x1080"・"16/9" を受理。未指定/不正は 16:9。表示(CSS)と書き出し(W/H)の両方で使う。
+export function deckRatio(meta: Record<string, string>): { w: number; h: number } {
+  const raw = (meta.size ?? meta.ratio ?? meta.aspect ?? '').trim().toLowerCase();
+  const m = /^(\d+(?:\.\d+)?)\s*[:x/]\s*(\d+(?:\.\d+)?)$/.exec(raw);
+  if (m) {
+    const w = Number(m[1]);
+    const h = Number(m[2]);
+    if (w > 0 && h > 0 && Number.isFinite(w) && Number.isFinite(h)) return { w, h };
+  }
+  return { w: 16, h: 9 };
+}
+
 export interface Deck {
   meta: Record<string, string>;
   slides: Slide[];

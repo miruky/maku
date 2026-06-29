@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseDeck, setBlockMarker, stripRevealDirectiveLines } from './deck';
+import { deckRatio, parseDeck, setBlockMarker, stripRevealDirectiveLines } from './deck';
 
 describe('parseDeck', () => {
   it('フロントマターを読み、本文から除く', () => {
@@ -47,6 +47,24 @@ describe('parseDeck', () => {
     expect(parseDeck('# a\n<!-- transition: ZOOM -->').slides[0]!.transition).toBe('zoom');
     expect(parseDeck('# a\n<!-- transition: spin -->').slides[0]!.transition).toBeUndefined();
     expect(parseDeck('# a').slides[0]!.transition).toBeUndefined();
+  });
+
+  it('deckRatio: size/ratio を解釈、未指定/不正は 16:9', () => {
+    expect(deckRatio({ size: '4:3' })).toEqual({ w: 4, h: 3 });
+    expect(deckRatio({ ratio: '16x9' })).toEqual({ w: 16, h: 9 });
+    expect(deckRatio({ size: '1920x1080' })).toEqual({ w: 1920, h: 1080 });
+    expect(deckRatio({ aspect: '16/10' })).toEqual({ w: 16, h: 10 });
+    expect(deckRatio({})).toEqual({ w: 16, h: 9 });
+    expect(deckRatio({ size: 'bogus' })).toEqual({ w: 16, h: 9 });
+    expect(deckRatio({ size: '0:0' })).toEqual({ w: 16, h: 9 });
+  });
+
+  it('footer/header/paginate のディレクティブを解釈する', () => {
+    const s = parseDeck('# a\n<!-- footer: 脚注 -->\n<!-- header: 表題 -->\n<!-- paginate: false -->').slides[0]!;
+    expect(s.footer).toBe('脚注');
+    expect(s.header).toBe('表題');
+    expect(s.paginate).toBe(false);
+    expect(parseDeck('# a\n<!-- paginate -->').slides[0]!.paginate).toBe(true);
   });
 
   it('headingDivider はコードフェンス内の見出しでは割らない', () => {
