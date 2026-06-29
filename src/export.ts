@@ -59,6 +59,9 @@ async function renderSlideCanvas(
     total: deck.slides.length,
     titles: deckTitles(deck.slides),
   });
+  // コピーボタンはUI専用。html2canvas は @media print を効かせないため、ノードごと取り除いて
+  // ラスタ書き出し(PDF/PPTX/PNG)に写り込まないようにする(タッチ端末では薄く可視のため)。
+  root.querySelectorAll('.code-copy').forEach((b) => b.remove());
   // 自由配置・図形(overlay)も書き出しに反映する(スライドの安定IDで紐付け)。
   const slide = root.querySelector('.slide');
   if (overlay && slide) applyOverlay(slide, slideOverlay(overlay, deck.slides[index]?.id ?? ''));
@@ -244,6 +247,8 @@ export async function exportHtml(deck: Deck, theme: Theme, overlay?: Overlay): P
     }
     // 先頭スライドを表示状態にしておく(ビューアJSが無効でも1枚は見える)。
     slideEls[0]?.classList.add('active');
+    // 配布物にはコピーボタンの実体を残さない(ビューアJSが無く機能しないため。CSSでも保険)。
+    deckRoot.querySelectorAll('.code-copy').forEach((b) => b.remove());
     const bodyHtml = deckRoot.outerHTML;
     // 数式フォント(KaTeX woff2)を焼き込み、配布先・オフラインでもグリフが崩れないようにする。
     const appCss = await inlineFontFiles(collectAppCss());

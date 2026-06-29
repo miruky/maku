@@ -634,6 +634,10 @@ body {
     display: none;
   }
 }
+/* 一覧(サムネイル)では誤タップ防止のためコピーボタンを出さない(移動専用のため)。 */
+.ov-thumb .code-copy {
+  display: none;
+}
 
 /* ── シンタックスハイライトのトークン色(themes.ts が --code-bg 上で AA を保証) ── */
 .hl-keyword,
