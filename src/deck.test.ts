@@ -79,6 +79,15 @@ describe('parseDeck', () => {
     expect(parseDeck('# 目次').slides[0]!.toc).toBeUndefined();
   });
 
+  it('<!-- hide --> / skip のスライドはデッキから除外する(原稿には残る)', () => {
+    const deck = parseDeck('# A\n\n---\n\n# B\n<!-- hide -->\n\n---\n\n# C');
+    expect(deck.slides).toHaveLength(2);
+    expect(deck.slides.map((s) => s.content)).toEqual(['# A', '# C']);
+    // 後ろのスライド(C)の絶対オフセットは隠しスライドがあってもずれない(直接編集の往復用)
+    const cStart = deck.slides[1]!.srcStart;
+    expect('# A\n\n---\n\n# B\n<!-- hide -->\n\n---\n\n# C'.slice(cStart)).toContain('# C');
+  });
+
   it('<!-- autoslide: N --> でスライド個別の自動送り時間(ms)を持つ', () => {
     expect(parseDeck('# a\n<!-- autoslide: 5 -->').slides[0]!.autoslide).toBe(5000);
     expect(parseDeck('# a\n<!-- autoslide: 500ms -->').slides[0]!.autoslide).toBe(500);

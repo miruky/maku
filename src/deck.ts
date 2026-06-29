@@ -82,6 +82,8 @@ export interface Slide {
   toc?: boolean;
   // <!-- autoslide: 5 --> でこのスライドの自動送り待ち時間(ms)を上書き。0 はこのスライドで停止。
   autoslide?: number;
+  // <!-- hide --> を置くと、このスライドは発表・一覧・書き出しから除外される(原稿には残る)。
+  hidden?: boolean;
 }
 
 // 受理するスライド遷移の種類。
@@ -197,7 +199,11 @@ export function parseDeck(source: string): Deck {
   const { meta, bodyStart } = extractFrontmatter(all);
   const body = all.slice(bodyStart);
   const chunks = splitSlides(body, headingDividerLevel(meta));
-  const slides = chunks.map(parseSlide).filter((s) => s.content.trim() !== '' || s.notes !== '');
+  // <!-- hide --> のスライドはデッキから除外する(発表・一覧・書き出し対象外。原稿には残る)。
+  // パース後に落とすだけなので、残るスライドの絶対オフセット(直接編集の data-src)はずれない。
+  const slides = chunks
+    .map(parseSlide)
+    .filter((s) => (s.content.trim() !== '' || s.notes !== '') && !s.hidden);
   if (slides.length === 0) {
     slides.push(parseSlide(body));
   }
@@ -293,6 +299,7 @@ function parseSlide(raw: SourceLine[]): Slide {
   let paginate: boolean | undefined;
   let toc: boolean | undefined;
   let autoslide: number | undefined;
+  let hidden: boolean | undefined;
   const classes: string[] = [];
   const kept: SourceLine[] = [];
   // 単独行マーカー(<!-- key --> など)は、次に来る本文ブロックに紐づける。
@@ -320,6 +327,7 @@ function parseSlide(raw: SourceLine[]): Slide {
         setPaginate: (v) => (paginate = v),
         setToc: () => (toc = true),
         setAutoslide: (ms) => (autoslide = ms),
+        setHidden: () => (hidden = true),
       });
       continue;
     }
@@ -447,6 +455,7 @@ function parseSlide(raw: SourceLine[]): Slide {
     paginate,
     toc,
     autoslide,
+    hidden,
   };
 }
 
@@ -609,6 +618,7 @@ interface DirectiveSink {
   setPaginate: (v: boolean) => void;
   setToc: () => void;
   setAutoslide: (ms: number) => void;
+  setHidden: () => void;
 }
 
 function applyDirective(body: string, sink: DirectiveSink): void {
@@ -640,5 +650,6 @@ function applyDirective(body: string, sink: DirectiveSink): void {
   if (word === 'incremental' || word === 'fragment') sink.setReveal('sequential');
   else if (word === 'paginate') sink.setPaginate(true);
   else if (word === 'toc' || word === 'agenda') sink.setToc();
+  else if (word === 'hide' || word === 'hidden' || word === 'skip') sink.setHidden();
   else if ((LAYOUTS as string[]).includes(word)) sink.setLayout(word as Layout);
 }
