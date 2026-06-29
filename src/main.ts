@@ -27,6 +27,7 @@ import {
   type VectorKind,
 } from './overlay';
 import { deckTitles, slideHtml } from './render';
+import { Annotator } from './annot';
 import { typesetMath } from './math';
 import { resetMermaid, typesetMermaid } from './mermaid';
 import { Presenter } from './present';
@@ -409,6 +410,7 @@ theme: ai-hiru-mincho
             <dt>T</dt><dd>テーマ選択</dd>
             <dt>P</dt><dd>書き出し</dd>
             <dt>B / W</dt><dd>画面を黒 / 白で覆う(注目誘導。もう一度で戻る)</dd>
+            <dt>D / L</dt><dd>手書きペン / レーザーポインタ(C で手書き消去・Esc/同キーで終了)</dd>
             <dt>A</dt><dd>自動送り(キオスク)の一時停止 / 再開 ※ frontmatter に autoslide</dd>
             <dt>?</dt><dd>このヘルプ</dd>
             <dt>Esc</dt><dd>開いているダイアログ / 全画面 / 図形選択を閉じる(編集パネル・ノートは E / S で切替)</dd>
@@ -496,6 +498,8 @@ const deckRoot = $('deck-root');
 const stage = $('stage');
 const mdInput = $<HTMLTextAreaElement>('md');
 const barTitle = $('bar-title');
+// 発表中の手書き注釈/レーザーポインタ(deck-root を覆う透明キャンバス。発表支援専用)。
+const annot = new Annotator(deckRoot);
 
 // 一覧・発表者ノート・各オーバーレイを deck-root の配下へ移す。これらは position:fixed のため
 // 通常表示では変わらず画面全体に出るが、全画面(requestFullscreen(deck-root))のときも
@@ -561,6 +565,7 @@ const presenter = new Presenter(
     if (location.hash !== `#${i + 1}`) history.replaceState(null, '', urlFor(i + 1));
     const lr = document.getElementById('live-region');
     if (lr) lr.textContent = `スライド ${i + 1} / ${presenter.total}`;
+    annot.clearInk(); // スライドを移ったら前ページの手書きは消す(モードは維持)
   },
   () => decorateStage(),
 );
@@ -2571,9 +2576,10 @@ window.addEventListener('keydown', (ev) => {
     return;
   }
 
-  // Escape(オーバーレイが無いとき): 右クリックメニュー → 全画面 → 選択解除 の順で閉じる。
+  // Escape(オーバーレイが無いとき): 右クリックメニュー → 注釈解除 → 全画面 → 選択解除 の順で閉じる。
   if (ev.key === 'Escape') {
     if (!ctxMenu.hidden) closeCtxMenu();
+    else if (annot.active) annot.setMode('off'); // 手書き/レーザーを抜ける(全画面より先に)
     else if (faux) fauxFull(false);
     else if (sel) deselect();
     return;
@@ -2648,6 +2654,20 @@ window.addEventListener('keydown', (ev) => {
     case 'w':
     case 'W':
       setBlank('white');
+      return;
+    case 'd':
+    case 'D':
+      annot.toggle('pen'); // 手書きペンのオン/オフ
+      toast(annot.active ? 'ペン: 描けます(C で消去 / D で終了)' : 'ペンを終了しました');
+      return;
+    case 'l':
+    case 'L':
+      annot.toggle('laser'); // レーザーポインタのオン/オフ
+      toast(annot.active ? 'レーザーポインタ ON(L で終了)' : 'レーザーを終了しました');
+      return;
+    case 'c':
+    case 'C':
+      annot.clearInk(); // 手書きを消す
       return;
     case 'a':
     case 'A': {
