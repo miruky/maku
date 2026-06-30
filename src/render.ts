@@ -1,8 +1,15 @@
-import { fenceScanner, type Slide } from './deck';
+import { fenceScanner, resolveAnim, type Slide } from './deck';
 import { escapeHtml, inline, renderMarkdown, renderMarkdownMapped } from './markdown';
 
 export function slideClassName(slide: Slide): string {
   return ['slide', `layout-${slide.layout}`, ...slide.classes].join(' ');
+}
+
+// 段階表示フラグメント/入場の演出を .slide の data-anim に載せる(CSS が [data-anim] で分岐)。
+// 無指定(従来の rise)のときは属性を出さない。値は deck.ts の許可リストで検証済みなので安全。
+function slideAnimAttr(slide: Slide, ctx?: SlideCtx): string {
+  const effect = resolveAnim(slide, ctx?.meta ?? {});
+  return effect ? ` data-anim="${effect}"` : '';
 }
 
 // url('…') の単一引用符や style 属性の二重引用符を抜け出せる文字を
@@ -442,7 +449,7 @@ function slideChromeHtml(slide: Slide, ctx: SlideCtx): string {
 // 1枚分のスライド要素。一覧のサムネイルにも使う。ctx を渡すとヘッダ/フッタ/ページ番号を付ける。
 export function slideHtml(slide: Slide, ctx?: SlideCtx): string {
   return (
-    `<div class="${slideClassName(slide)}"${slideStyleAttr(slide)}>` +
+    `<div class="${slideClassName(slide)}"${slideStyleAttr(slide)}${slideAnimAttr(slide, ctx)}>` +
     `<div class="slide-body">${slideInnerHtml(slide)}${tocHtml(slide, ctx)}</div>` +
     (ctx ? slideChromeHtml(slide, ctx) : '') +
     `</div>`
@@ -456,7 +463,7 @@ export function slideInnerHtmlMapped(slide: Slide): string {
 
 export function slideHtmlMapped(slide: Slide, ctx?: SlideCtx): string {
   return (
-    `<div class="${slideClassName(slide)}"${slideStyleAttr(slide)}>` +
+    `<div class="${slideClassName(slide)}"${slideStyleAttr(slide)}${slideAnimAttr(slide, ctx)}>` +
     `<div class="slide-body">${slideInnerHtmlMapped(slide)}${tocHtml(slide, ctx)}</div>` +
     (ctx ? slideChromeHtml(slide, ctx) : '') +
     `</div>`

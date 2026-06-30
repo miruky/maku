@@ -84,11 +84,28 @@ export interface Slide {
   autoslide?: number;
   // <!-- hide --> を置くと、このスライドは発表・一覧・書き出しから除外される(原稿には残る)。
   hidden?: boolean;
+  // <!-- anim: rise|fade|fly|zoom|wipe|auto|off --> で、このスライドの段階表示フラグメント/入場の
+  // 演出を上書き(無指定はデッキ既定 anim:、それも無ければ従来どおり rise)。値は許可リストで検証する。
+  anim?: string;
 }
 
 // 受理するスライド遷移の種類。
 export const TRANSITIONS = ['none', 'fade', 'slide', 'zoom'] as const;
 export type Transition = (typeof TRANSITIONS)[number];
+
+// 受理する登場アニメ(段階表示フラグメント/入場)の効果。rise=既定(下から立ち上がる)、
+// off=演出なし、auto=要素種別で自動に選ぶ。CSS は .slide[data-anim=…] でこれを分岐する。
+export const ANIM_EFFECTS = ['off', 'none', 'rise', 'fade', 'fly', 'zoom', 'wipe', 'auto'] as const;
+export type AnimEffect = (typeof ANIM_EFFECTS)[number];
+
+// スライドの登場アニメ効果を解決する。スライド個別(<!-- anim: … -->)→ デッキ既定(frontmatter anim:)
+// の順。'none' は 'off' に正規化する。未指定/不正は '' を返し、呼び出し側は従来既定(rise)に委ねる
+// (= data-anim を出さず、CSS の既定 .frag-current が rise する)。
+export function resolveAnim(slide: Slide, meta: Record<string, string>): string {
+  const raw = (slide.anim ?? meta.anim ?? '').trim().toLowerCase();
+  if (!(ANIM_EFFECTS as readonly string[]).includes(raw)) return '';
+  return raw === 'none' ? 'off' : raw;
+}
 
 // frontmatter の size:/ratio:/aspect: からデッキの縦横比を得る。"16:9"・"4:3"・"16x9"・
 // "1920x1080"・"16/9" を受理。未指定/不正は 16:9。表示(CSS)と書き出し(W/H)の両方で使う。
@@ -326,6 +343,7 @@ function parseSlide(raw: SourceLine[]): Slide {
   let toc: boolean | undefined;
   let autoslide: number | undefined;
   let hidden: boolean | undefined;
+  let anim: string | undefined;
   const classes: string[] = [];
   const kept: SourceLine[] = [];
   // 単独行マーカー(<!-- key --> など)は、次に来る本文ブロックに紐づける。
@@ -354,6 +372,7 @@ function parseSlide(raw: SourceLine[]): Slide {
         setToc: () => (toc = true),
         setAutoslide: (ms) => (autoslide = ms),
         setHidden: () => (hidden = true),
+        setAnim: (v) => (anim = v),
       });
       continue;
     }
@@ -482,6 +501,7 @@ function parseSlide(raw: SourceLine[]): Slide {
     toc,
     autoslide,
     hidden,
+    anim,
   };
 }
 
@@ -645,6 +665,7 @@ interface DirectiveSink {
   setToc: () => void;
   setAutoslide: (ms: number) => void;
   setHidden: () => void;
+  setAnim: (v: string) => void;
 }
 
 function applyDirective(body: string, sink: DirectiveSink): void {
@@ -655,6 +676,8 @@ function applyDirective(body: string, sink: DirectiveSink): void {
     if (key === 'layout' && (LAYOUTS as string[]).includes(value)) sink.setLayout(value as Layout);
     else if (key === 'transition' && (TRANSITIONS as readonly string[]).includes(value.toLowerCase())) {
       sink.setTransition(value.toLowerCase());
+    } else if (key === 'anim' && (ANIM_EFFECTS as readonly string[]).includes(value.toLowerCase())) {
+      sink.setAnim(value.toLowerCase());
     } else if (key === 'footer') sink.setFooter(value);
     else if (key === 'header') sink.setHeader(value);
     else if (key === 'paginate') sink.setPaginate(/^(true|on|yes|1)$/i.test(value));

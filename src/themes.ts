@@ -250,7 +250,7 @@ export function themeById(id: string): Theme {
   return THEMES.find((t) => t.id === id) ?? THEMES.find((t) => t.id === DEFAULT_THEME_ID) ?? THEMES[0]!;
 }
 
-function parseHsl(value: string): [number, number, number] {
+export function parseHsl(value: string): [number, number, number] {
   const m = /hsl\(\s*([\d.]+)\s+([\d.]+)%\s+([\d.]+)%/.exec(value);
   if (!m) return [0, 0, 0];
   return hslToRgb(Number(m[1]), Number(m[2]), Number(m[3]));

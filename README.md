@@ -22,7 +22,7 @@ Markdownを貼り付けると、その場でスライドに変換して表示し
 | 記法 | 効果 |
 |:--|:--|
 | `---`(単独行) | スライドの区切り |
-| 先頭の `---` ブロック | フロントマター(`title:`、`theme:`、`accent:`、`transition:`、`headingDivider:`、`size:`、`autoslide:` など) |
+| 先頭の `---` ブロック | フロントマター(`title:`、`theme:`、`accent:`、`transition:`、`anim:`、`headingDivider:`、`size:`、`autoslide:` など) |
 | `<!-- center -->` / `title` / `full` | レイアウト(中央寄せ・表紙・全面) |
 | `<!-- layout: split / grid / cards / stats / timeline / quote / section / compare / image-left / image-right -->` | レイアウト(段組・グリッド・カード・数値強調・年表・引用・章扉・対比・画像分割) |
 | `===`(単独行) | 段組・グリッド・各段の区切り |
@@ -31,6 +31,7 @@ Markdownを貼り付けると、その場でスライドに変換して表示し
 | `<!-- key -->` / `<!-- step: N -->` / `<!-- group -->` / `<!-- pin -->` | 段階表示のマーカー(直後のブロックに付与) |
 | `<!-- class: 名前 -->` | 任意のクラスを付与 |
 | `<!-- transition: fade/slide/zoom/none -->` | スライド切替の演出(フロントマター `transition:` でデッキ既定も指定可) |
+| `<!-- anim: rise/fade/fly/zoom/wipe/auto/off -->` | 段階表示で各ブロックが現れるときの登場アニメ(フロントマター `anim:` でデッキ既定。既定は控えめな `rise`、`auto` は要素ごとに自動選択、`off` で無し) |
 | ` ```言語 title=ファイル名 lineNumbers {1,3-5} ` | コードブロックの言語・タイトル帯・行番号・行範囲ハイライト(情報文字列) |
 | `$…$` / `$$…$$` | 数式(KaTeX をインライン / ブロックで描画。ライブラリは使用時のみ遅延ロード) |
 | ` ```mermaid ` | Mermaid 図(フローチャート・シーケンス図など。使用時のみ遅延ロードして SVG 描画) |

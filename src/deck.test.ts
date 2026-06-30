@@ -3,6 +3,7 @@ import {
   deckRatio,
   parseAutoslideMs,
   parseDeck,
+  resolveAnim,
   setBlockMarker,
   slideRanges,
   stripRevealDirectiveLines,
@@ -513,5 +514,38 @@ describe('setBlockMarker(ブロック単位の段階表示マーカー)', () => 
     expect(out).toContain('<!-- step: 1 -->');
     expect(out).toContain('<!-- step: 2 -->');
     expect(steps.length).toBe(3);
+  });
+});
+
+describe('登場アニメ(anim:)', () => {
+  it('スライドの <!-- anim: fly --> を取り込む', () => {
+    const s = parseDeck('<!-- anim: fly -->\n# x').slides[0]!;
+    expect(s.anim).toBe('fly');
+    expect(resolveAnim(s, {})).toBe('fly');
+  });
+  it('不正な効果名は無視(slide.anim 未設定・既定 rise に委ねるため空を返す)', () => {
+    const s = parseDeck('<!-- anim: spin -->\n# x').slides[0]!;
+    expect(s.anim).toBeUndefined();
+    expect(resolveAnim(s, {})).toBe('');
+  });
+  it("'none' は 'off' に正規化する", () => {
+    const s = parseDeck('<!-- anim: none -->\n# x').slides[0]!;
+    expect(resolveAnim(s, {})).toBe('off');
+  });
+  it('大文字小文字を問わない', () => {
+    const s = parseDeck('<!-- anim: WIPE -->\n# x').slides[0]!;
+    expect(resolveAnim(s, {})).toBe('wipe');
+  });
+  it('frontmatter anim: がデッキ既定になる', () => {
+    const deck = parseDeck('---\nanim: fade\n---\n\n# x');
+    expect(resolveAnim(deck.slides[0]!, deck.meta)).toBe('fade');
+  });
+  it('frontmatter の不正値も無視して空を返す', () => {
+    const deck = parseDeck('---\nanim: wobble\n---\n\n# x');
+    expect(resolveAnim(deck.slides[0]!, deck.meta)).toBe('');
+  });
+  it('スライド指定が frontmatter を上書きする', () => {
+    const deck = parseDeck('---\nanim: fade\n---\n\n<!-- anim: zoom -->\n# x');
+    expect(resolveAnim(deck.slides[0]!, deck.meta)).toBe('zoom');
   });
 });

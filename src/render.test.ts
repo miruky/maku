@@ -252,3 +252,20 @@ describe('目次(TOC)', () => {
     expect(titles).toEqual([{ n: 1, title: 'Foo #' }]);
   });
 });
+
+describe('登場アニメ data-anim', () => {
+  it('anim 指定スライドは .slide に data-anim を出す', () => {
+    const s = slide('<!-- anim: zoom -->\n# x');
+    expect(slideHtmlMapped(s)).toContain('data-anim="zoom"');
+    expect(slideHtml(s)).toContain('data-anim="zoom"');
+  });
+  it('無指定では data-anim を出さない(従来どおり既定の rise)', () => {
+    expect(slideHtmlMapped(slide('# x'))).not.toContain('data-anim');
+    expect(slideHtml(slide('# x'))).not.toContain('data-anim');
+  });
+  it('frontmatter anim: が ctx.meta 経由で既定になる', () => {
+    const deck = parseDeck('---\nanim: fade\n---\n\n# x');
+    const ctx = { meta: deck.meta, index: 0, total: 1 };
+    expect(slideHtml(deck.slides[0]!, ctx)).toContain('data-anim="fade"');
+  });
+});
