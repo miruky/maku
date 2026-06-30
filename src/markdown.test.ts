@@ -84,6 +84,17 @@ describe('renderMarkdown', () => {
     expect(code).toContain('hl-keyword'); // const がキーワードとして色付く
   });
 
+  it('コード行範囲ハイライト {1,3} は対象行に cl-hl、非対象は cl', () => {
+    const html = renderMarkdown('```ts {1,3}\na\nb\nc\n```');
+    const lines = html.match(/<div class="cl[^"]*">/g) ?? [];
+    expect(lines).toHaveLength(3);
+    expect(lines[0]).toContain('cl-hl');
+    expect(lines[1]).not.toContain('cl-hl');
+    expect(lines[2]).toContain('cl-hl');
+    // 範囲指定が無いときは行ラップしない(従来どおりの出力)。
+    expect(renderMarkdown('```ts\na\nb\n```')).not.toContain('class="cl"');
+  });
+
   it('表(配置つき)', () => {
     const html = renderMarkdown('| 名 | 値 |\n|:--|--:|\n| a | 1 |');
     expect(html).toContain('<table>');

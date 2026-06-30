@@ -19,6 +19,16 @@ function span(type: string, text: string): string {
   return `<span class="hl-${type}">${esc(text)}</span>`;
 }
 
+// 改行をまたぐトークン(ブロックコメント・複数行文字列)を行ごとの span に割る。
+// これで出力中の \n は必ず span の外に来るので、後段(markdown.ts)で行ごとに安全に分割でき、
+// 行ハイライト(行単位のラップ)を入れてもトークン span が壊れない。
+function spanMulti(type: string, text: string): string {
+  return text
+    .split('\n')
+    .map((line) => (line ? span(type, line) : ''))
+    .join('\n');
+}
+
 const set = (s: string): Set<string> => new Set(s.trim().split(/\s+/));
 
 interface Grammar {
@@ -177,15 +187,15 @@ function tokenizeGeneric(code: string, g: Grammar, litSet?: Set<string>): string
     let m: RegExpExecArray | null;
 
     // コメント
-    if (g.blockComment && (m = /^\/\*[\s\S]*?\*\//.exec(rest))) { out += span('comment', m[0]); i += m[0].length; continue; }
+    if (g.blockComment && (m = /^\/\*[\s\S]*?\*\//.exec(rest))) { out += spanMulti('comment', m[0]); i += m[0].length; continue; }
     if (g.slashComment && (m = /^\/\/[^\n]*/.exec(rest))) { out += span('comment', m[0]); i += m[0].length; continue; }
     if (g.hashComment && (m = /^#[^\n]*/.exec(rest))) { out += span('comment', m[0]); i += m[0].length; continue; }
     if (g.dashComment && (m = /^--[^\n]*/.exec(rest))) { out += span('comment', m[0]); i += m[0].length; continue; }
 
     // 文字列
-    if (g.tripleString && (m = /^"""[\s\S]*?"""|^'''[\s\S]*?'''/.exec(rest))) { out += span('string', m[0]); i += m[0].length; continue; }
+    if (g.tripleString && (m = /^"""[\s\S]*?"""|^'''[\s\S]*?'''/.exec(rest))) { out += spanMulti('string', m[0]); i += m[0].length; continue; }
     if ((m = /^"(?:\\.|[^"\\\n])*"|^'(?:\\.|[^'\\\n])*'/.exec(rest))) { out += span('string', m[0]); i += m[0].length; continue; }
-    if (g.backtickString && (m = /^`(?:\\.|[^`\\])*`/.exec(rest))) { out += span('string', m[0]); i += m[0].length; continue; }
+    if (g.backtickString && (m = /^`(?:\\.|[^`\\])*`/.exec(rest))) { out += spanMulti('string', m[0]); i += m[0].length; continue; }
 
     // 数値
     if ((m = NUMBER_RE.exec(rest)) && m[0].length) { out += span('number', m[0]); i += m[0].length; continue; }

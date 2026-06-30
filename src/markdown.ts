@@ -269,12 +269,35 @@ const CODE_COPY_BTN =
   '<path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ' +
   'd="M9 9h10v10H9z M5 15H4V5h10v1"/></svg></button>';
 
-function parseCodeMeta(meta: string): { title: string; lineNumbers: boolean } {
+// フェンス情報文字列の {1,3-5} を、ハイライトする行番号(1始まり)の集合にする。
+function parseHlLines(meta: string): Set<number> {
+  const set = new Set<number>();
+  const m = /\{([\d\s,-]+)\}/.exec(meta);
+  if (!m) return set;
+  for (const part of m[1]!.split(',')) {
+    const range = part.trim();
+    const rm = /^(\d+)\s*-\s*(\d+)$/.exec(range);
+    if (rm) {
+      const a = Number(rm[1]);
+      const b = Number(rm[2]);
+      for (let i = Math.min(a, b); i <= Math.max(a, b); i += 1) set.add(i);
+    } else if (/^\d+$/.test(range)) {
+      set.add(Number(range));
+    }
+  }
+  return set;
+}
+
+function parseCodeMeta(meta: string): {
+  title: string;
+  lineNumbers: boolean;
+  hlLines: Set<number>;
+} {
   const lineNumbers = /(^|\W)line[-_]?numbers(\W|$)/i.test(meta);
   let title = '';
   const tm = /\btitle\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s}]+))/.exec(meta);
   if (tm) title = tm[1] ?? tm[2] ?? tm[3] ?? '';
-  return { title, lineNumbers };
+  return { title, lineNumbers, hlLines: parseHlLines(meta) };
 }
 
 // Mermaid 図ブロック。data-mermaid に原文を持たせ、mermaid.ts が SVG に描画する。
@@ -307,7 +330,16 @@ function codeBlock(cur: Cursor, mark: string, lang: string, meta = ''): string {
   const opts = parseCodeMeta(meta);
   // ハイライトは純粋な string→string。トークンは span、その他はエスケープ済みなので
   // 直接編集(preToMd)は span を透過して元コードを復元でき、書き出しにもそのまま乗る。
-  const inner = highlightCode(body.join('\n'), lang);
+  let inner = highlightCode(body.join('\n'), lang);
+  // {1,3-5} 指定時は各行を <div class="cl"> で囲み、対象行に cl-hl を付ける。改行は div 境界に
+  // 移るが、preToMd(inlineToMd の DIV 規則)が改行を復元するので往復はロスレス。複数行トークンは
+  // highlight 側で行ごとの span に割ってあるので、ここでの \n 分割でトークンが壊れない。
+  if (opts.hlLines.size) {
+    inner = inner
+      .split('\n')
+      .map((line, i) => `<div class="cl${opts.hlLines.has(i + 1) ? ' cl-hl' : ''}">${line}</div>`)
+      .join('');
+  }
   const langClass = lang ? ` class="language-${lang}"` : '';
   const classes = ['code-block'];
   if (opts.lineNumbers) classes.push('has-ln');

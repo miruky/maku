@@ -648,6 +648,22 @@ body {
   line-height: 1.6;
 }
 
+/* コード行範囲ハイライト({1,3-5})。指定時のみ各行が <div class="cl"> になり、対象行を帯で示す。
+   配色はアクセントの薄掛け+左の縦バーで、明暗テーマとも本文の可読性を保つ。 */
+.slide pre .cl {
+  display: block;
+}
+/* 行番号ガターが無いときは pre の左右パディングまで帯を伸ばして全幅に見せる
+   (ガター併用時=flex レイアウトでは負マージンがガターに被るので content 幅のまま)。 */
+.slide pre:not(.has-ln) .cl {
+  margin: 0 -1.1em;
+  padding: 0 1.1em;
+}
+.slide pre .cl-hl {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
 .code-lang {
   position: absolute;
   top: 0.5em;
