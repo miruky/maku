@@ -8,6 +8,7 @@ import { fitSlideBody } from './fit';
 import { renderMarkdown } from './markdown';
 import { hasPendingMath, typesetMath } from './math';
 import { hasPendingMermaid, typesetMermaid } from './mermaid';
+import { hasPendingQr, typesetQr } from './qr';
 import { applyOverlay, loadOverlay, slideOverlay } from './overlay';
 import { deckTitles, slideHtml, slideHtmlMapped } from './render';
 import { openSync, type SyncMsg } from './sync';
@@ -114,6 +115,7 @@ function renderPreview(
   };
   if (hasPendingMath(stage)) void typesetMath(stage).then(refit);
   if (hasPendingMermaid(stage)) void typesetMermaid(stage).then(refit);
+  if (hasPendingQr(stage)) void typesetQr(stage).then(refit);
 }
 
 function render(): void {

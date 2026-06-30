@@ -30,6 +30,7 @@ import { deckTitles, slideHtml } from './render';
 import { Annotator } from './annot';
 import { hasPendingMath, typesetMath } from './math';
 import { hasPendingMermaid, resetMermaid, typesetMermaid } from './mermaid';
+import { hasPendingQr, typesetQr } from './qr';
 import { openSync, type SyncMsg } from './sync';
 import { Presenter } from './present';
 import {
@@ -2082,7 +2083,10 @@ function decorateStage(): void {
   // 描画でレイアウト(高さ)が変わるため、終わったら収まり直し(refit)を再計算する。
   void typesetMath($('notes-body'));
   void typesetMermaid($('notes-body')); // 発表者ノート内の Mermaid 図も描画する
-  void Promise.all([typesetMath(stage), typesetMermaid(stage)]).then(() => presenter.refit());
+  void typesetQr($('notes-body')); // ノート内の QR も描画する
+  void Promise.all([typesetMath(stage), typesetMermaid(stage), typesetQr(stage)]).then(() =>
+    presenter.refit(),
+  );
   const enable = liveEdit && !presenting;
   presenter.setAuthoring(enable);
   deckRoot.classList.toggle('live', enable);
@@ -2503,11 +2507,12 @@ async function doPrint(): Promise<void> {
   // mermaid ソースがそのまま PDF に焼き付いてしまう。どちらも DOM のレイアウトに依存せず
   // 描画できるため、print-deck が画面上では display:none でも問題なく実体化できる。
   // 数式・図が無いデッキでは即座に返り、KaTeX/Mermaid の遅延チャンクも読み込まれない。
-  if (hasPendingMath(host) || hasPendingMermaid(host)) {
+  if (hasPendingMath(host) || hasPendingMermaid(host) || hasPendingQr(host)) {
     setBusy(true, '印刷用に数式・図を描画中…', 0, 1);
     try {
       await typesetMath(host);
       await typesetMermaid(host);
+      await typesetQr(host);
     } finally {
       setBusy(false);
     }

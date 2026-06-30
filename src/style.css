@@ -396,6 +396,34 @@ body {
   margin: 0;
 }
 
+/* QR コード。スキャン可読性のため白地のカードに収める(テーマ非依存の黒/白)。 */
+.qr-block {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin: 0.4em 0;
+}
+.qr-block svg {
+  width: min(34cqw, 48cqh);
+  height: auto;
+  background: #fff;
+  padding: 2cqmin;
+  border-radius: 6px;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.18);
+}
+.qr-src {
+  font-family: var(--mono);
+  font-size: 0.72em;
+  white-space: pre-wrap;
+  word-break: break-all;
+  opacity: 0.8;
+  margin: 0;
+}
+.qr-block.qr-error .qr-src::before {
+  content: 'QR化に失敗(長すぎる可能性): ';
+  opacity: 0.7;
+}
+
 /* 発表中の手書き注釈/レーザーポインタのキャンバス。スライドの上、暗幕の下に重ねる。 */
 .annot-canvas {
   position: absolute;

@@ -285,6 +285,13 @@ function mermaidBlockHtml(src: string): string {
   return `<div class="mermaid-block" data-mermaid="${safe.replace(/"/g, '&quot;')}"><pre class="mermaid-src">${safe}</pre></div>`;
 }
 
+// QR コードブロック。data-qr に原文(URL/テキスト)を持たせ、qr.ts が SVG に描画する。
+// mermaid と同様 <code> ではないので preToMd は触れず、編集の往復は blockToMd が data-qr から復元する。
+function qrBlockHtml(src: string): string {
+  const safe = escapeHtml(src.trim());
+  return `<div class="qr-block" data-qr="${safe.replace(/"/g, '&quot;')}"><pre class="qr-src">${safe}</pre></div>`;
+}
+
 function codeBlock(cur: Cursor, mark: string, lang: string, meta = ''): string {
   cur.i += 1;
   const body: string[] = [];
@@ -295,6 +302,8 @@ function codeBlock(cur: Cursor, mark: string, lang: string, meta = ''): string {
   if (cur.i < cur.lines.length) cur.i += 1; // 閉じフェンス
   // ```mermaid は図として扱う(ハイライトせず、mermaid.ts が SVG 描画)。
   if (lang.toLowerCase() === 'mermaid') return mermaidBlockHtml(body.join('\n'));
+  // ```qr は QR コードとして扱う(qr.ts が SVG 描画)。
+  if (lang.toLowerCase() === 'qr') return qrBlockHtml(body.join('\n'));
   const opts = parseCodeMeta(meta);
   // ハイライトは純粋な string→string。トークンは span、その他はエスケープ済みなので
   // 直接編集(preToMd)は span を透過して元コードを復元でき、書き出しにもそのまま乗る。

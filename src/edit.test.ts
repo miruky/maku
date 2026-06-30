@@ -96,6 +96,13 @@ describe('blockToMd(view → md)', () => {
     expect(blockToMd(block)).toBe(md);
   });
 
+  it('QR を data-qr から ```qr 往復で保つ', () => {
+    const md = '```qr\nhttps://example.com/maku?a=1&b=2\n```';
+    const block = first(md);
+    expect(block.classList.contains('qr-block')).toBe(true);
+    expect(blockToMd(block)).toBe(md);
+  });
+
   it('段階表示の番号バッジは本文に直列化しない', () => {
     // 回帰防止: 編集中に付く .step-badge の数字が見出し/段落に混入し Markdown が壊れていた。
     const h = first('# 表題');

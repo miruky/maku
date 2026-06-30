@@ -67,6 +67,9 @@ export function blockToMd(el: Element): string {
   // Mermaid 図は data-mermaid から ```mermaid フェンスを復元(SVG描画後の中身を直列化しない)。
   if (el.classList.contains('mermaid-block'))
     return '```mermaid\n' + (el.getAttribute('data-mermaid') ?? '') + '\n```';
+  // QR は data-qr から ```qr フェンスを復元(SVG描画後の中身を直列化しない)。
+  if (el.classList.contains('qr-block'))
+    return '```qr\n' + (el.getAttribute('data-qr') ?? '') + '\n```';
   if (/^H[1-6]$/.test(tag)) {
     const level = Number(tag[1]);
     return '#'.repeat(level) + ' ' + inlineChildren(el).trim();

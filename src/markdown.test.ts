@@ -169,6 +169,20 @@ describe('renderMarkdown', () => {
     expect(html).not.toContain('<b>x</b>');
   });
 
+  it('```qr は QR ブロック(.qr-block + data-qr)にし、ハイライトしない', () => {
+    const html = renderMarkdown('```qr\nhttps://example.com/x?a=1\n```');
+    expect(html).toContain('class="qr-block"');
+    expect(html).toContain('data-qr="https://example.com/x?a=1"');
+    expect(html).not.toContain('code-block');
+    expect(html).toContain('https://example.com/x?a=1'); // 描画前フォールバックに残る
+  });
+
+  it('qr のソースは属性へHTMLエスケープして入れる(注入防止)', () => {
+    const html = renderMarkdown('```qr\n"><img src=x onerror=alert(1)>\n```');
+    expect(html).toContain('&lt;img');
+    expect(html).not.toContain('<img src=x');
+  });
+
   it('画像 alt のディレクティブ(サイズ/フィルタ)を style にし、altから除く', () => {
     const html = renderMarkdown('![ロゴ w:200 h:120 blur:4px rounded](https://e.com/a.png)');
     expect(html).toContain('width:200px');
