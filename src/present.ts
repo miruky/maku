@@ -1,6 +1,7 @@
-import type { Deck, Slide } from './deck';
+import { parseAutoslideMs, type Deck, type Slide } from './deck';
+import { clearFit, fitSlideBody } from './fit';
 import { renderMarkdown } from './markdown';
-import { slideHtml, slideHtmlMapped } from './render';
+import { deckTitles, slideHtml, slideHtmlMapped } from './render';
 
 export interface PresenterEls {
   stage: HTMLElement;
@@ -19,15 +20,26 @@ export class Presenter {
   private step = 1;
   // 編集中(authoring)は段階表示で隠さず全て見せる。発表/閲覧時のみ実際に段階表示する。
   private authoring = false;
+  // 自動送り(キオスク)。autoOn のとき、各スライド/ステップを slideMs() 後に進める。
+  private autoOn = false;
+  private deckAutoMs = 0; // frontmatter autoslide(ms、0=無効)
+  private loop = false; // frontmatter loop。末尾で先頭へ戻る
+  private autoTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private readonly els: PresenterEls,
     private readonly onChange?: (index: number) => void,
     private readonly onAfterRender?: () => void,
+    // スライド・ステップが変わるたびに呼ぶ(発表者コンソールへの状態同期に使う)。
+    private readonly onStep?: () => void,
   ) {}
 
   get index(): number {
     return this.idx;
+  }
+  // 現在のステップ(1始まり)。発表者コンソールへの同期で参照する。
+  get currentStep(): number {
+    return this.step;
   }
   get total(): number {
     return this.deck.slides.length;
@@ -38,6 +50,8 @@ export class Presenter {
 
   setDeck(deck: Deck, keepIndex = true, animate = false): void {
     this.deck = deck;
+    this.deckAutoMs = parseAutoslideMs(deck.meta.autoslide ?? deck.meta.autoadvance ?? '') ?? 0;
+    this.loop = /^(true|on|yes|1)$/i.test(deck.meta.loop ?? '');
     const max = Math.max(0, deck.slides.length - 1);
     this.idx = keepIndex ? Math.min(this.idx, max) : 0;
     this.step = 1;
@@ -54,6 +68,21 @@ export class Presenter {
     // 発表へ復帰したスライドが途中状態(全表示のまま)で始まらないようにする。
     this.step = this.minStep();
     this.applySteps();
+    // 直接編集中は素のサイズ(選択枠・バッジの座標が合うように)、発表/閲覧時は枠に収める。
+    this.fitCurrent();
+  }
+
+  // 数式/図などの遅延描画でレイアウトが変わった後に、収まり直しを再計算する(外部から呼ぶ)。
+  refit(): void {
+    this.fitCurrent();
+  }
+
+  // 現在スライドの本文を、編集中でなければ枠に収まるよう縮小する(はみ出し対策)。
+  private fitCurrent(): void {
+    const slideEl = this.els.stage.querySelector<HTMLElement>('.slide');
+    if (!slideEl) return;
+    if (this.authoring) clearFit(slideEl);
+    else fitSlideBody(slideEl);
   }
 
   // 現在スライドの段階表示を先頭へ戻す(発表開始時に呼ぶ。閲覧中に進めた途中状態で始めない)。
@@ -63,6 +92,7 @@ export class Presenter {
   }
 
   go(i: number, atEnd = false): void {
+    if (!Number.isFinite(i)) return; // NaN/Infinity でナビゲーションを壊さない
     const dir = i < this.idx ? 'back' : 'fwd';
     this.idx = Math.max(0, Math.min(this.total - 1, i));
     this.step = 1;
@@ -128,6 +158,55 @@ export class Presenter {
       el.classList.toggle('frag-past', active && keyFirst && s > 0 && s < this.step);
     }
     this.updateAux();
+    this.scheduleAuto();
+    this.onStep?.();
+  }
+
+  // ── 自動送り(キオスク) ──
+  // 自動送りの ON/OFF。発表開始/終了時に main から呼ぶほか、'A' キーで切り替える。
+  setAutoPlay(on: boolean): void {
+    this.autoOn = on;
+    this.scheduleAuto();
+  }
+  get autoPlaying(): boolean {
+    return this.autoOn;
+  }
+  // このデッキで自動送りが設定されているか(frontmatter か、いずれかのスライドに autoslide)。
+  get hasAutoAdvance(): boolean {
+    return this.deckAutoMs > 0 || this.deck.slides.some((s) => (s.autoslide ?? 0) > 0);
+  }
+
+  // 現在スライドの待ち時間(ms)。個別指定が優先(0=このスライドは送らない)、無指定はデッキ既定。
+  private slideMs(): number {
+    const per = this.current()?.autoslide;
+    return per !== undefined ? per : this.deckAutoMs;
+  }
+
+  // 次の自動送りを予約し直す。applySteps から呼ぶので、手動移動でもタイマーが再起動する。
+  private scheduleAuto(): void {
+    if (this.autoTimer !== null) {
+      clearTimeout(this.autoTimer);
+      this.autoTimer = null;
+    }
+    if (!this.autoOn || this.authoring) return;
+    const ms = this.slideMs();
+    if (!(ms > 0)) return; // このスライドは自動送りしない
+    this.autoTimer = setTimeout(() => {
+      this.autoTimer = null;
+      this.autoTick();
+    }, ms);
+  }
+
+  // タイマー発火時の進行。スライド末尾かつデッキ末尾なら loop で先頭へ、でなければ停止。
+  private autoTick(): void {
+    const atSlideEnd = this.authoring || this.step >= this.maxStep();
+    const atDeckEnd = this.idx >= this.total - 1;
+    if (atDeckEnd && atSlideEnd) {
+      if (this.loop) this.go(0);
+      else this.setAutoPlay(false); // 末尾で停止(無駄打ちしない)
+      return;
+    }
+    this.next(); // applySteps 経由で次のタイマーを予約
   }
 
   // 発表者ノートの補助表示(次スライドのプレビュー / 現スライドのステップ進捗)を更新する。
@@ -139,22 +218,40 @@ export class Presenter {
     }
     if (this.els.next) {
       const nx = this.deck.slides[this.idx + 1];
+      // 次が目次スライドのときはプレビューにも目次を出す(本表示と一致させる)。
+      const nxCtx = nx
+        ? {
+            meta: this.deck.meta,
+            index: this.idx + 1,
+            total: this.total,
+            titles: nx.toc ? deckTitles(this.deck.slides) : undefined,
+          }
+        : undefined;
       this.els.next.innerHTML = nx
-        ? `<div class="np-label">次のスライド (${this.idx + 2} / ${this.total})</div><div class="np-thumb">${slideHtml(nx)}</div>`
+        ? `<div class="np-label">次のスライド (${this.idx + 2} / ${this.total})</div><div class="np-thumb">${slideHtml(nx, nxCtx)}</div>`
         : '<div class="np-label np-end">これが最後のスライドです</div>';
     }
   }
 
   private render(dir: 'fwd' | 'back' = 'fwd', animate = true): void {
     const slide = this.current();
+    // 入場演出の種類(スライド個別 → デッキ既定 → slide)。CSS が [data-transition] で分岐する。
+    const t = (slide?.transition ?? this.deck.meta.transition ?? 'slide').toLowerCase();
+    this.els.stage.dataset.transition = ['none', 'fade', 'slide', 'zoom'].includes(t) ? t : 'slide';
     this.els.stage.classList.remove('enter', 'enter-back');
     if (animate) void this.els.stage.offsetWidth;
     this.els.stage.innerHTML = slide
-      ? slideHtmlMapped(slide)
+      ? slideHtmlMapped(slide, {
+          meta: this.deck.meta,
+          index: this.idx,
+          total: this.total,
+          titles: slide.toc ? deckTitles(this.deck.slides) : undefined,
+        })
       : '<div class="slide"><div class="slide-body"><p class="empty">スライドがありません</p></div></div>';
     if (animate) this.els.stage.classList.add(dir === 'back' ? 'enter-back' : 'enter');
 
     this.applySteps();
+    this.fitCurrent();
     const pct = this.total ? ((this.idx + 1) / this.total) * 100 : 0;
     this.els.progress.style.width = `${pct}%`;
     this.els.counter.textContent = `${this.total ? this.idx + 1 : 0} / ${this.total}`;

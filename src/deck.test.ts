@@ -1,5 +1,85 @@
 import { describe, expect, it } from 'vitest';
-import { parseDeck, setBlockMarker, stripRevealDirectiveLines } from './deck';
+import {
+  deckRatio,
+  parseAutoslideMs,
+  parseDeck,
+  resolveAnim,
+  setBlockMarker,
+  slideRanges,
+  stripRevealDirectiveLines,
+} from './deck';
+
+// 並べ替えで隠しスライドを取りこぼさないことを担保する(slideRanges は全スライドを返し、
+// visible だけ並べると deck.slides と一致する)。
+describe('slideRanges(並べ替え用・隠しスライド保全)', () => {
+  const md = '# A\n\n---\n\n<!-- hide -->\n# 隠し\n\n---\n\n# B';
+  it('隠し・空も含む全スライドを範囲付きで返す', () => {
+    const { slides } = slideRanges(md);
+    expect(slides).toHaveLength(3);
+    expect(slides.map((x) => x.visible)).toEqual([true, false, true]);
+  });
+  it('visible のみ並べると deck.slides と同順・同内容', () => {
+    const { slides } = slideRanges(md);
+    const visText = slides
+      .filter((x) => x.visible)
+      .map((x) => md.slice(x.srcStart, x.srcEnd).trim());
+    const deckText = parseDeck(md).slides.map((s) => s.content.split('\n')[0]);
+    expect(visText[0]).toContain('# A');
+    expect(visText[1]).toContain('# B');
+    expect(deckText).toEqual(['# A', '# B']); // 隠しは除外
+  });
+  it('全 segment を join し直すと、隠しスライドが原文に残る(往復で消えない)', () => {
+    const { bodyStart, slides } = slideRanges(md);
+    const prefix = md.slice(0, bodyStart);
+    const segs = slides.map((x) => md.slice(x.srcStart, x.srcEnd));
+    // B を先頭へ移す並べ替え相当(full index 2 を 0 の前へ)
+    const moved = segs.splice(2, 1)[0]!;
+    segs.splice(0, 0, moved);
+    const newMd = prefix + segs.join('\n\n---\n\n') + '\n';
+    expect(newMd).toContain('<!-- hide -->'); // 隠し指示が残る
+    expect(parseDeck(newMd).slides.map((s) => s.content.split('\n')[0])).toEqual(['# B', '# A']);
+    expect(slideRanges(newMd).slides.filter((x) => !x.visible)).toHaveLength(1); // 隠しスライドが残存
+  });
+  it('回帰: フロントマター直後に --- がある(先頭空スライド)デッキでも prefix でメタを失わない', () => {
+    const fm = '---\ntheme: rose\npaginate: true\n---\n---\n# A\n\n---\n\n# B';
+    const { bodyStart, slides } = slideRanges(fm);
+    const prefix = fm.slice(0, bodyStart);
+    expect(prefix).toContain('theme: rose'); // フロントマターが prefix に入る
+    const segs = slides.map((x) => fm.slice(x.srcStart, x.srcEnd));
+    // A(visible 先頭=full index1)を末尾へ
+    const moved = segs.splice(1, 1)[0]!;
+    segs.push(moved);
+    const out = prefix + segs.join('\n\n---\n\n') + '\n';
+    expect(parseDeck(out).meta.theme).toBe('rose'); // メタが保持される
+    expect(parseDeck(out).meta.paginate).toBe('true');
+  });
+  it('回帰: コードフェンス内の --- を含むスライドを並べ替えても割れない', () => {
+    const fenced = '# A\n\n```\nx\n---\ny\n```\n\n---\n\n# B';
+    const before = parseDeck(fenced).slides.length;
+    const { bodyStart, slides } = slideRanges(fenced);
+    const prefix = fenced.slice(0, bodyStart);
+    const segs = slides.map((x) => fenced.slice(x.srcStart, x.srcEnd));
+    const moved = segs.splice(1, 1)[0]!; // B を先頭へ
+    segs.splice(0, 0, moved);
+    const out = prefix + segs.join('\n\n---\n\n') + '\n';
+    const after = parseDeck(out);
+    expect(after.slides.length).toBe(before); // フェンス内 --- で割れない
+    expect(after.slides.map((s) => s.content.split('\n')[0])).toEqual(['# B', '# A']);
+  });
+  it('回帰: headingDivider デッキの並べ替えでスライド枚数が増えない', () => {
+    const hd = '---\nheadingDivider: 2\n---\n## A\nbody a\n## B\nbody b\n## C\nbody c';
+    const before = parseDeck(hd).slides.length;
+    const { bodyStart, slides } = slideRanges(hd);
+    const prefix = hd.slice(0, bodyStart);
+    const segs = slides.map((x) => hd.slice(x.srcStart, x.srcEnd));
+    const moved = segs.splice(2, 1)[0]!; // C を先頭へ
+    segs.splice(0, 0, moved);
+    const out = prefix + segs.join('\n\n---\n\n') + '\n';
+    const after = parseDeck(out);
+    expect(after.slides.length).toBe(before); // 枚数不変(空スライドが増えない)
+    expect(after.slides.map((s) => s.content.split('\n')[0])).toEqual(['## C', '## A', '## B']);
+  });
+});
 
 describe('parseDeck', () => {
   it('フロントマターを読み、本文から除く', () => {
@@ -19,6 +99,97 @@ describe('parseDeck', () => {
   it('空のスライドは除く', () => {
     const deck = parseDeck('# 1\n\n---\n\n---\n\n# 2');
     expect(deck.slides).toHaveLength(2);
+  });
+
+  it('headingDivider: 指定レベル以下の見出しでも自動分割する(--- 不要)', () => {
+    const md = '---\nheadingDivider: 2\n---\n# タイトル\n本文0\n## 章A\n本文A\n## 章B\n本文B';
+    const deck = parseDeck(md);
+    expect(deck.slides).toHaveLength(3);
+    expect(deck.slides[0]!.content).toBe('# タイトル\n本文0');
+    expect(deck.slides[1]!.content).toBe('## 章A\n本文A');
+    expect(deck.slides[2]!.content).toBe('## 章B\n本文B');
+  });
+
+  it('headingDivider はハッシュ列(##)でも数値でも受理し、レベル超の見出しでは割らない', () => {
+    const md = '---\nslideDividers: "##"\n---\n## A\n### 小見出し\n## B';
+    const deck = parseDeck(md);
+    expect(deck.slides).toHaveLength(2);
+    expect(deck.slides[0]!.content).toBe('## A\n### 小見出し');
+  });
+
+  it('headingDivider 未指定なら従来どおり --- だけで分割', () => {
+    const deck = parseDeck('# A\n## B\n## C');
+    expect(deck.slides).toHaveLength(1);
+  });
+
+  it('<!-- transition: X --> を解釈し、不正値は無視する', () => {
+    expect(parseDeck('# a\n<!-- transition: fade -->').slides[0]!.transition).toBe('fade');
+    expect(parseDeck('# a\n<!-- transition: ZOOM -->').slides[0]!.transition).toBe('zoom');
+    expect(parseDeck('# a\n<!-- transition: spin -->').slides[0]!.transition).toBeUndefined();
+    expect(parseDeck('# a').slides[0]!.transition).toBeUndefined();
+  });
+
+  it('deckRatio: size/ratio を解釈、未指定/不正は 16:9', () => {
+    expect(deckRatio({ size: '4:3' })).toEqual({ w: 4, h: 3 });
+    expect(deckRatio({ ratio: '16x9' })).toEqual({ w: 16, h: 9 });
+    expect(deckRatio({ size: '1920x1080' })).toEqual({ w: 1920, h: 1080 });
+    expect(deckRatio({ aspect: '16/10' })).toEqual({ w: 16, h: 10 });
+    expect(deckRatio({})).toEqual({ w: 16, h: 9 });
+    expect(deckRatio({ size: 'bogus' })).toEqual({ w: 16, h: 9 });
+    expect(deckRatio({ size: '0:0' })).toEqual({ w: 16, h: 9 });
+  });
+
+  it('footer/header/paginate のディレクティブを解釈する', () => {
+    const s = parseDeck('# a\n<!-- footer: 脚注 -->\n<!-- header: 表題 -->\n<!-- paginate: false -->').slides[0]!;
+    expect(s.footer).toBe('脚注');
+    expect(s.header).toBe('表題');
+    expect(s.paginate).toBe(false);
+    expect(parseDeck('# a\n<!-- paginate -->').slides[0]!.paginate).toBe(true);
+  });
+
+  it('<!-- toc --> / <!-- agenda --> で目次フラグが立つ', () => {
+    expect(parseDeck('# 目次\n<!-- toc -->').slides[0]!.toc).toBe(true);
+    expect(parseDeck('# 目次\n<!-- agenda -->').slides[0]!.toc).toBe(true);
+    expect(parseDeck('# 目次').slides[0]!.toc).toBeUndefined();
+  });
+
+  it('<!-- hide --> / skip のスライドはデッキから除外する(原稿には残る)', () => {
+    const deck = parseDeck('# A\n\n---\n\n# B\n<!-- hide -->\n\n---\n\n# C');
+    expect(deck.slides).toHaveLength(2);
+    expect(deck.slides.map((s) => s.content)).toEqual(['# A', '# C']);
+    // 後ろのスライド(C)の絶対オフセットは隠しスライドがあってもずれない(直接編集の往復用)
+    const cStart = deck.slides[1]!.srcStart;
+    expect('# A\n\n---\n\n# B\n<!-- hide -->\n\n---\n\n# C'.slice(cStart)).toContain('# C');
+  });
+
+  it('<!-- autoslide: N --> でスライド個別の自動送り時間(ms)を持つ', () => {
+    expect(parseDeck('# a\n<!-- autoslide: 5 -->').slides[0]!.autoslide).toBe(5000);
+    expect(parseDeck('# a\n<!-- autoslide: 500ms -->').slides[0]!.autoslide).toBe(500);
+    expect(parseDeck('# a\n<!-- autoslide: off -->').slides[0]!.autoslide).toBe(0);
+    expect(parseDeck('# a\n<!-- autoslide: zzz -->').slides[0]!.autoslide).toBeUndefined();
+    expect(parseDeck('# a').slides[0]!.autoslide).toBeUndefined();
+  });
+
+  it('headingDivider はコードフェンス内の見出しでは割らない', () => {
+    const md = '---\nheadingDivider: 1\n---\n# A\n```\n# これはコード\n```\n本文';
+    const deck = parseDeck(md);
+    expect(deck.slides).toHaveLength(1);
+  });
+
+  it('headingDivider: 見出し直前のディレクティブは次スライドに属する(前へ漏れない)', () => {
+    const md = '---\nheadingDivider: 2\n---\n# Title\nintro\n<!-- bg: #f00 -->\n## A\nbody';
+    const deck = parseDeck(md);
+    expect(deck.slides).toHaveLength(2);
+    expect(deck.slides[0]!.background).toBeNull();
+    expect(deck.slides[1]!.background).toBe('#f00');
+    expect(deck.slides[1]!.content).toBe('## A\nbody');
+  });
+
+  it('headingDivider: 見出し前のレイアウト指示が効く(指示だけの塊で消えない)', () => {
+    const md = '---\nheadingDivider: 1\n---\n<!-- layout: split -->\n# A\nleft\n===\nright';
+    const deck = parseDeck(md);
+    expect(deck.slides).toHaveLength(1);
+    expect(deck.slides[0]!.layout).toBe('split');
   });
 
   it('<!-- id: xxx --> をスライドの安定IDに取り込む', () => {
@@ -190,6 +361,23 @@ describe('parseDeck', () => {
   });
 });
 
+describe('parseAutoslideMs', () => {
+  it('既定は秒、ms 接尾辞は ms として読む', () => {
+    expect(parseAutoslideMs('5')).toBe(5000);
+    expect(parseAutoslideMs('5s')).toBe(5000);
+    expect(parseAutoslideMs('2.5')).toBe(2500);
+    expect(parseAutoslideMs('750ms')).toBe(750);
+  });
+  it('off/none/0 は 0(停止)、空・不正は undefined', () => {
+    expect(parseAutoslideMs('off')).toBe(0);
+    expect(parseAutoslideMs('none')).toBe(0);
+    expect(parseAutoslideMs('0')).toBe(0);
+    expect(parseAutoslideMs('')).toBeUndefined();
+    expect(parseAutoslideMs('fast')).toBeUndefined();
+    expect(parseAutoslideMs('5x')).toBeUndefined();
+  });
+});
+
 describe('stripRevealDirectiveLines', () => {
   it('先頭の reveal / incremental / fragment ディレクティブ行を取り除く', () => {
     expect(stripRevealDirectiveLines('<!-- reveal: sequential -->\n# A\n本文')).toBe('# A\n本文');
@@ -326,5 +514,38 @@ describe('setBlockMarker(ブロック単位の段階表示マーカー)', () => 
     expect(out).toContain('<!-- step: 1 -->');
     expect(out).toContain('<!-- step: 2 -->');
     expect(steps.length).toBe(3);
+  });
+});
+
+describe('登場アニメ(anim:)', () => {
+  it('スライドの <!-- anim: fly --> を取り込む', () => {
+    const s = parseDeck('<!-- anim: fly -->\n# x').slides[0]!;
+    expect(s.anim).toBe('fly');
+    expect(resolveAnim(s, {})).toBe('fly');
+  });
+  it('不正な効果名は無視(slide.anim 未設定・既定 rise に委ねるため空を返す)', () => {
+    const s = parseDeck('<!-- anim: spin -->\n# x').slides[0]!;
+    expect(s.anim).toBeUndefined();
+    expect(resolveAnim(s, {})).toBe('');
+  });
+  it("'none' は 'off' に正規化する", () => {
+    const s = parseDeck('<!-- anim: none -->\n# x').slides[0]!;
+    expect(resolveAnim(s, {})).toBe('off');
+  });
+  it('大文字小文字を問わない', () => {
+    const s = parseDeck('<!-- anim: WIPE -->\n# x').slides[0]!;
+    expect(resolveAnim(s, {})).toBe('wipe');
+  });
+  it('frontmatter anim: がデッキ既定になる', () => {
+    const deck = parseDeck('---\nanim: fade\n---\n\n# x');
+    expect(resolveAnim(deck.slides[0]!, deck.meta)).toBe('fade');
+  });
+  it('frontmatter の不正値も無視して空を返す', () => {
+    const deck = parseDeck('---\nanim: wobble\n---\n\n# x');
+    expect(resolveAnim(deck.slides[0]!, deck.meta)).toBe('');
+  });
+  it('スライド指定が frontmatter を上書きする', () => {
+    const deck = parseDeck('---\nanim: fade\n---\n\n<!-- anim: zoom -->\n# x');
+    expect(resolveAnim(deck.slides[0]!, deck.meta)).toBe('zoom');
   });
 });

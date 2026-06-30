@@ -21,6 +21,24 @@ describe('blockToMd(view → md)', () => {
     expect(blockToMd(first('~~消~~ も残す'))).toBe('~~消~~ も残す');
   });
 
+  it('ハイライト/上付き/下付きを往復で保つ', () => {
+    expect(blockToMd(first('==重要== な点'))).toBe('==重要== な点');
+    expect(blockToMd(first('面積は x^2^ です'))).toBe('面積は x^2^ です');
+    expect(blockToMd(first('水は H~2~O'))).toBe('水は H~2~O');
+  });
+
+  it('記法に戻せない上付き/下付き(空白混入など)は壊れた ~/^ を残さずプレーンに落とす', () => {
+    // 編集で sub/sup の中身に空白が入ると ~x~/^x^ 記法では表せない。素のテキストへ。
+    const p = document.createElement('p');
+    p.innerHTML = 'H<sub>2 と 3</sub>O';
+    expect(blockToMd(p)).toBe('H2 と 3O');
+    const p2 = document.createElement('p');
+    p2.innerHTML = 'x<sup>n m</sup>';
+    expect(blockToMd(p2)).toBe('xn m');
+    // 落とした結果が打消し ~~ や別記法に化けないこと。
+    expect(blockToMd(p)).not.toContain('~');
+  });
+
   it('リンク', () => {
     expect(blockToMd(first('[名](https://e.com)'))).toBe('[名](https://e.com)');
   });
@@ -52,6 +70,44 @@ describe('blockToMd(view → md)', () => {
   it('コードブロック', () => {
     const md = '```ts\nconst a = 1;\n```';
     expect(blockToMd(first(md))).toBe(md);
+  });
+
+  it('コードfenceの情報文字列(title=/lineNumbers)を往復で保つ(回帰防止)', () => {
+    const md = '```ts title=app.ts lineNumbers\nconst a = 1;\n```';
+    expect(blockToMd(first(md))).toBe(md);
+  });
+
+  it('コピーボタン(.code-copy)は <code> 外なので往復で混入しない', () => {
+    const md = '```js\nconst a = 1;\nfn();\n```';
+    const pre = first(md);
+    expect(pre.querySelector('.code-copy')).not.toBeNull(); // 描画にはボタンがある
+    expect(blockToMd(pre)).toBe(md); // でも原文には出てこない
+  });
+
+  it('数式(インライン/ブロック)を data-tex から往復で保つ', () => {
+    expect(blockToMd(first('$$\nE = mc^2\n$$'))).toBe('$$\nE = mc^2\n$$');
+    expect(blockToMd(first('式 $a^2$ だ'))).toBe('式 $a^2$ だ');
+  });
+
+  it('Mermaid 図を data-mermaid から ```mermaid 往復で保つ', () => {
+    const md = '```mermaid\ngraph TD\n  A-->B\n```';
+    const block = first(md);
+    expect(block.classList.contains('mermaid-block')).toBe(true);
+    expect(blockToMd(block)).toBe(md);
+  });
+
+  it('QR を data-qr から ```qr 往復で保つ', () => {
+    const md = '```qr\nhttps://example.com/maku?a=1&b=2\n```';
+    const block = first(md);
+    expect(block.classList.contains('qr-block')).toBe(true);
+    expect(blockToMd(block)).toBe(md);
+  });
+
+  it('行ハイライト({2})+複数行コメントのコードを往復ロスレスで保つ', () => {
+    const md = '```ts {2}\nconst a = 1;\n/* multi\nline */\nconst b = 2;\n```';
+    const block = first(md);
+    expect(block.querySelector('.cl-hl')).not.toBeNull(); // 行ラップされている
+    expect(blockToMd(block)).toBe(md); // 改行・コメント・メタ({2})まで完全復元
   });
 
   it('段階表示の番号バッジは本文に直列化しない', () => {

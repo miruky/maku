@@ -1,8 +1,15 @@
-import type { Slide } from './deck';
+import { fenceScanner, resolveAnim, type Slide } from './deck';
 import { escapeHtml, inline, renderMarkdown, renderMarkdownMapped } from './markdown';
 
 export function slideClassName(slide: Slide): string {
   return ['slide', `layout-${slide.layout}`, ...slide.classes].join(' ');
+}
+
+// 段階表示フラグメント/入場の演出を .slide の data-anim に載せる(CSS が [data-anim] で分岐)。
+// 無指定(従来の rise)のときは属性を出さない。値は deck.ts の許可リストで検証済みなので安全。
+function slideAnimAttr(slide: Slide, ctx?: SlideCtx): string {
+  const effect = resolveAnim(slide, ctx?.meta ?? {});
+  return effect ? ` data-anim="${effect}"` : '';
 }
 
 // url('…') の単一引用符や style 属性の二重引用符を抜け出せる文字を
@@ -377,11 +384,74 @@ export function slideInnerHtml(slide: Slide): string {
   return renderBody(slide, false);
 }
 
-// 1枚分のスライド要素。一覧のサムネイルにも使う。
-export function slideHtml(slide: Slide): string {
+// ヘッダ/フッタ/ページ番号(クローム)用の文脈。デッキ既定(meta)とスライド個別指定を解決する。
+export interface SlideCtx {
+  meta: Record<string, string>;
+  index: number;
+  total: number;
+  // 目次(<!-- toc -->)スライド用。全スライドの見出し一覧(番号付き)。
+  titles?: Array<{ n: number; title: string }>;
+}
+
+// スライド本文の最初の ATX 見出し(# 〜 ######)のテキストを返す。無ければ空文字。
+// コードフェンス内の `#` 行は見出しとみなさない(fenceScanner で本文と一致させる)。
+// 見出し判定は実際の描画(markdown.ts の /^(#{1,6})\s+(.*)$/)と同じ規則にそろえる。
+function firstHeading(slide: Slide): string {
+  const protectedLine = fenceScanner();
+  for (const line of slide.content.split('\n')) {
+    const prot = protectedLine(line);
+    if (prot) continue; // フェンス区切り/フェンス内は対象外
+    const m = /^(#{1,6})\s+(.*)$/.exec(line);
+    if (m) return m[2]!.trim();
+  }
+  return '';
+}
+
+// 目次に載せるスライド見出しの一覧。目次スライド自身と見出しの無いスライドは除外し、
+// アジェンダとして 1 から連番を振る。書き出し・本表示・編集ステージで共通利用する。
+export function deckTitles(slides: Slide[]): Array<{ n: number; title: string }> {
+  const out: Array<{ n: number; title: string }> = [];
+  for (const s of slides) {
+    if (s.toc) continue;
+    const title = firstHeading(s);
+    if (!title) continue;
+    out.push({ n: out.length + 1, title });
+  }
+  return out;
+}
+
+// 目次スライド(<!-- toc -->)の本文。全スライドの見出しを番号付きリストで出す。
+function tocHtml(slide: Slide, ctx?: SlideCtx): string {
+  if (!slide.toc || !ctx?.titles || !ctx.titles.length) return '';
+  const items = ctx.titles
+    .map(
+      (t) =>
+        `<li class="toc-item"><span class="toc-no">${t.n}</span>` +
+        `<span class="toc-title">${inline(escapeHtml(t.title))}</span></li>`,
+    )
+    .join('');
+  return `<ol class="toc">${items}</ol>`;
+}
+
+// スライド個別 → デッキ既定 の順で解決し、ヘッダ/フッタ/ページ番号のHTMLを返す。
+// 本文(.slide-body)とは別レイヤなので、レイアウトや段階表示に干渉しない。書き出しにも乗る。
+function slideChromeHtml(slide: Slide, ctx: SlideCtx): string {
+  const headerText = slide.header ?? ctx.meta.header ?? '';
+  const footerText = slide.footer ?? ctx.meta.footer ?? '';
+  const paginate = slide.paginate ?? /^(true|on|yes|1)$/i.test(ctx.meta.paginate ?? '');
+  let html = '';
+  if (headerText) html += `<div class="slide-header">${inline(escapeHtml(headerText))}</div>`;
+  if (footerText) html += `<div class="slide-footer">${inline(escapeHtml(footerText))}</div>`;
+  if (paginate) html += `<div class="slide-pageno">${ctx.index + 1} / ${ctx.total}</div>`;
+  return html;
+}
+
+// 1枚分のスライド要素。一覧のサムネイルにも使う。ctx を渡すとヘッダ/フッタ/ページ番号を付ける。
+export function slideHtml(slide: Slide, ctx?: SlideCtx): string {
   return (
-    `<div class="${slideClassName(slide)}"${slideStyleAttr(slide)}>` +
-    `<div class="slide-body">${slideInnerHtml(slide)}</div>` +
+    `<div class="${slideClassName(slide)}"${slideStyleAttr(slide)}${slideAnimAttr(slide, ctx)}>` +
+    `<div class="slide-body">${slideInnerHtml(slide)}${tocHtml(slide, ctx)}</div>` +
+    (ctx ? slideChromeHtml(slide, ctx) : '') +
     `</div>`
   );
 }
@@ -391,10 +461,11 @@ export function slideInnerHtmlMapped(slide: Slide): string {
   return renderBody(slide, true);
 }
 
-export function slideHtmlMapped(slide: Slide): string {
+export function slideHtmlMapped(slide: Slide, ctx?: SlideCtx): string {
   return (
-    `<div class="${slideClassName(slide)}"${slideStyleAttr(slide)}>` +
-    `<div class="slide-body">${slideInnerHtmlMapped(slide)}</div>` +
+    `<div class="${slideClassName(slide)}"${slideStyleAttr(slide)}${slideAnimAttr(slide, ctx)}>` +
+    `<div class="slide-body">${slideInnerHtmlMapped(slide)}${tocHtml(slide, ctx)}</div>` +
+    (ctx ? slideChromeHtml(slide, ctx) : '') +
     `</div>`
   );
 }

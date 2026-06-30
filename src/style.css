@@ -264,8 +264,8 @@ body {
 .deck-root {
   position: relative;
   width: 100%;
-  max-width: calc((100vh - 200px) * 16 / 9);
-  aspect-ratio: 16 / 9;
+  max-width: calc((100vh - 200px) * var(--deck-ar-num, 1.7778));
+  aspect-ratio: var(--deck-ar, 16 / 9);
   background: var(--bg, #fff);
   color: var(--fg, #111);
   border-radius: var(--r-lg);
@@ -289,6 +289,10 @@ body {
   justify-content: flex-start;
   padding: 7cqh 8cqw;
   background: var(--bg);
+  /* 二段階の高さ(elevation)。光源は上=影は下に落ちる、を全要素で統一する(単一光源の規律)。
+     色は固定の暗色なので明暗どちらのテーマでも「沈み」として読め、本文の配色(WCAG)には触れない。 */
+  --elev-1: 0 1px 2px rgba(0, 0, 0, 0.07), 0 10px 24px -14px rgba(0, 0, 0, 0.28);
+  --elev-2: 0 2px 4px rgba(0, 0, 0, 0.09), 0 22px 48px -18px rgba(0, 0, 0, 0.36);
 }
 
 .slide-body {
@@ -300,13 +304,174 @@ body {
   overflow-wrap: anywhere;
 }
 
-.stage.enter .slide {
-  animation: slide-in 0.4s var(--ease) both;
+/* ヘッダ/フッタ/ページ番号。本文の余白(padding)領域に控えめに置く。書き出しにも乗る。 */
+.slide-header,
+.slide-footer,
+.slide-pageno {
+  position: absolute;
+  font-family: var(--body-font);
+  font-size: 2.2cqh;
+  line-height: 1.3;
+  color: var(--muted);
+  opacity: 0.85;
+  z-index: 1;
+  pointer-events: none;
+}
+.slide-header {
+  top: 2.6cqh;
+  left: 8cqw;
+  right: 8cqw;
+}
+.slide-footer {
+  bottom: 2.6cqh;
+  left: 8cqw;
+  max-width: 70cqw;
+}
+.slide-pageno {
+  bottom: 2.6cqh;
+  right: 8cqw;
+  font-variant-numeric: tabular-nums;
 }
 
-.stage.enter-back .slide {
+/* 目次(<!-- toc -->)。全スライドの見出しを番号付きで縦に並べる。本文(見出し等)の下に出る。 */
+.toc {
+  list-style: none;
+  margin: 0.4em 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55em;
+  counter-reset: none;
+}
+.toc-item {
+  display: flex;
+  align-items: baseline;
+  gap: 0.7em;
+  font-size: 1.05em;
+  line-height: 1.35;
+}
+.toc-no {
+  flex: none;
+  min-width: 1.7em;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--accent);
+  opacity: 0.9;
+}
+.toc-title {
+  color: var(--fg);
+}
+
+/* 数式(KaTeX)。ブロックは中央寄せ、横にあふれたらスクロール。インラインは行に馴染ませる。 */
+.math-block {
+  display: block;
+  text-align: center;
+  margin: 0.5em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.math-inline {
+  white-space: nowrap;
+}
+/* KaTeX 未ロード/失敗時の生 TeX フォールバックは等幅で控えめに見せる。 */
+.math:not([data-tex-done]) {
+  font-family: var(--mono);
+  opacity: 0.85;
+}
+
+/* Mermaid 図。中央寄せで枠に収める。描画後の SVG は幅・高さを枠に合わせる。 */
+.mermaid-block {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin: 0.4em 0;
+}
+.mermaid-block svg {
+  max-width: 100%;
+  height: auto;
+}
+/* 描画前/失敗時のフォールバック(生ソース)は等幅で控えめに(成功時は SVG に置換され消える)。 */
+.mermaid-src {
+  font-family: var(--mono);
+  font-size: 0.72em;
+  white-space: pre-wrap;
+  opacity: 0.8;
+  margin: 0;
+}
+
+/* QR コード。スキャン可読性のため白地のカードに収める(テーマ非依存の黒/白)。 */
+.qr-block {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin: 0.4em 0;
+}
+.qr-block svg {
+  width: min(34cqw, 48cqh);
+  height: auto;
+  background: #fff;
+  padding: 2cqmin;
+  border-radius: 6px;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.18);
+}
+.qr-src {
+  font-family: var(--mono);
+  font-size: 0.72em;
+  white-space: pre-wrap;
+  word-break: break-all;
+  opacity: 0.8;
+  margin: 0;
+}
+.qr-block.qr-error .qr-src::before {
+  content: 'QR化に失敗(長すぎる可能性): ';
+  opacity: 0.7;
+}
+
+/* 発表中の手書き注釈/レーザーポインタのキャンバス。スライドの上、暗幕の下に重ねる。 */
+.annot-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 60;
+  touch-action: none; /* 描画中にスクロール/ズームへ取られない */
+}
+
+/* 発表中のブラックアウト/ホワイトアウト。deckRoot を覆う(全画面でも有効)。 */
+.screen-blank {
+  position: absolute;
+  inset: 0;
+  z-index: 90;
+  cursor: pointer;
+}
+.screen-blank[data-mode='black'] {
+  background: #000;
+}
+.screen-blank[data-mode='white'] {
+  background: #fff;
+}
+
+/* スライド入場の演出。既定は slide(従来どおり)。data-transition で fade/zoom/none に切替。 */
+.stage.enter[data-transition='slide'] .slide,
+.stage:not([data-transition]).enter .slide {
+  animation: slide-in 0.4s var(--ease) both;
+}
+.stage.enter-back[data-transition='slide'] .slide,
+.stage:not([data-transition]).enter-back .slide {
   animation: slide-in-back 0.4s var(--ease) both;
 }
+.stage.enter[data-transition='fade'] .slide,
+.stage.enter-back[data-transition='fade'] .slide {
+  animation: fade-in 0.4s var(--ease) both;
+}
+.stage.enter[data-transition='zoom'] .slide {
+  animation: zoom-in 0.4s var(--ease) both;
+}
+.stage.enter-back[data-transition='zoom'] .slide {
+  animation: zoom-in-back 0.4s var(--ease) both;
+}
+/* data-transition='none' は一致する規則が無く、アニメーションしない(瞬時切替)。 */
 
 @keyframes slide-in {
   from {
@@ -330,6 +495,37 @@ body {
   }
 }
 
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes zoom-in {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes zoom-in-back {
+  from {
+    opacity: 0;
+    transform: scale(1.06);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 .slide h1,
 .slide h2,
 .slide h3,
@@ -338,34 +534,52 @@ body {
 .slide h6 {
   font-family: var(--heading-font);
   font-weight: var(--heading-weight, 700);
-  line-height: 1.25;
+  line-height: 1.2;
   letter-spacing: 0.01em;
   text-wrap: balance;
 }
 
+/* タイトルはディスプレイ級に。大きく・字間を詰め・行間を締めて、表紙やリード見出しに「強さ」を出す。 */
 .slide h1 {
-  font-size: 2.1em;
-  margin-bottom: 0.4em;
-  letter-spacing: -0.005em;
+  font-size: 2.55em;
+  line-height: 1.08;
+  margin-bottom: 0.36em;
+  letter-spacing: -0.022em;
 }
 
 .slide h2 {
-  font-size: 1.5em;
+  font-size: 1.7em;
+  line-height: 1.16;
   margin-bottom: 0.5em;
+  letter-spacing: -0.012em;
   color: var(--accent);
 }
 
 .slide h3 {
-  font-size: 1.15em;
+  font-size: 1.22em;
   margin-bottom: 0.4em;
+  letter-spacing: -0.006em;
 }
 
+/* h4 は小見出し=アイブロウ(章の入口)。頭にアクセントの短い罫を添えて「ここから」を示す装飾DNA。 */
 .slide h4 {
   font-size: 0.78em;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--muted, var(--accent));
-  margin-bottom: 0.3em;
+  margin-bottom: 0.35em;
+}
+/* アクセントの短い罫を本文の前にインラインで置く(flex にしないので、複数語や **強調**・
+   `コード` を含むアイブロウでも語間に隙間が空かない)。 */
+.slide h4::before {
+  content: '';
+  display: inline-block;
+  vertical-align: middle;
+  width: 1.7em;
+  height: 0.16em;
+  margin-right: 0.6em;
+  border-radius: 1px;
+  background: var(--accent);
 }
 
 .slide h5,
@@ -377,6 +591,11 @@ body {
 
 .slide-body > * + * {
   margin-top: 0.7em;
+}
+
+/* 見出しは直前の本文から少し離し、視線に段落の切れ目を作る(資料らしいリズム)。 */
+.slide-body > * + :is(h1, h2, h3) {
+  margin-top: 1.15em;
 }
 
 .slide p,
@@ -415,6 +634,25 @@ body {
 
 .slide strong {
   color: var(--fg);
+  font-weight: 700;
+}
+
+/* ==ハイライト==。文字色は --fg のまま、背景はアクセントの半透明にして
+   明テーマ/暗テーマどちらでも本文の可読性(AA)を保つ。 */
+.slide mark {
+  background: color-mix(in srgb, var(--accent, #f1c40f) 30%, transparent);
+  color: inherit;
+  padding: 0 0.14em;
+  border-radius: 0.2em;
+  /* 行をまたいで折り返しても、各行片が角丸・余白を保つ(半端なちぎれを防ぐ)。 */
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+/* 上付き・下付きで行の高さが暴れないように。 */
+.slide sub,
+.slide sup {
+  line-height: 0;
 }
 
 .slide code {
@@ -423,6 +661,9 @@ body {
   background: var(--code-bg, rgba(127, 127, 127, 0.16));
   padding: 0.1em 0.4em;
   border-radius: 5px;
+  /* 日本語で行をまたいで折り返しても、各行片が角丸・余白を保つ(チップが半端にちぎれない)。 */
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
 }
 
 .slide pre {
@@ -441,6 +682,22 @@ body {
   line-height: 1.6;
 }
 
+/* コード行範囲ハイライト({1,3-5})。指定時のみ各行が <div class="cl"> になり、対象行を帯で示す。
+   配色はアクセントの薄掛け+左の縦バーで、明暗テーマとも本文の可読性を保つ。 */
+.slide pre .cl {
+  display: block;
+}
+/* 行番号ガターが無いときは pre の左右パディングまで帯を伸ばして全幅に見せる
+   (ガター併用時=flex レイアウトでは負マージンがガターに被るので content 幅のまま)。 */
+.slide pre:not(.has-ln) .cl {
+  margin: 0 -1.1em;
+  padding: 0 1.1em;
+}
+.slide pre .cl-hl {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
 .code-lang {
   position: absolute;
   top: 0.5em;
@@ -452,12 +709,153 @@ body {
   color: var(--muted, #888);
 }
 
-.slide blockquote {
-  border-left: 0.25em solid var(--accent);
-  padding-left: 0.8em;
-  color: var(--muted, inherit);
+/* コードのコピーボタン。ふだんは隠し、コードブロックにホバー/フォーカスで現れる。 */
+.code-copy {
+  position: absolute;
+  top: 0.45em;
+  right: 0.5em;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.9em;
+  height: 1.9em;
+  padding: 0;
+  border: 1px solid var(--rule);
+  border-radius: 7px;
+  background: var(--code-bg, rgba(127, 127, 127, 0.14));
+  color: var(--muted, #888);
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity 0.12s ease,
+    color 0.12s ease,
+    border-color 0.12s ease;
+}
+.slide pre:hover .code-copy,
+.code-copy:focus-visible {
+  opacity: 1;
+}
+.code-copy:hover,
+.code-copy.copied {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+/* コピーボタンが出ているときは言語チップを控えて重なりを避ける。 */
+.slide pre:hover .code-lang {
+  opacity: 0;
+}
+/* タッチ端末(ホバー無し)では薄く常時表示。 */
+@media (hover: none) {
+  .code-copy {
+    opacity: 0.55;
+  }
+}
+/* 印刷やラスタ書き出しにはコピーUIを出さない。 */
+@media print {
+  .code-copy {
+    display: none;
+  }
+}
+/* 一覧(サムネイル)では誤タップ防止のためコピーボタンを出さない(移動専用のため)。 */
+.ov-thumb .code-copy {
+  display: none;
 }
 
+/* ── シンタックスハイライトのトークン色(themes.ts が --code-bg 上で AA を保証) ── */
+.hl-keyword,
+.hl-tag {
+  color: var(--hl-keyword, var(--accent));
+}
+.hl-string,
+.hl-inserted {
+  color: var(--hl-string, var(--accent));
+}
+.hl-number,
+.hl-attr {
+  color: var(--hl-number, var(--accent));
+}
+.hl-function,
+.hl-property {
+  color: var(--hl-function, var(--fg));
+}
+.hl-type {
+  color: var(--hl-type, var(--fg));
+}
+.hl-literal,
+.hl-builtin,
+.hl-meta {
+  color: var(--hl-literal, var(--accent));
+}
+.hl-deleted {
+  color: var(--hl-deleted, var(--accent));
+}
+.hl-comment {
+  color: var(--hl-comment, var(--muted));
+  font-style: italic;
+}
+.hl-operator {
+  color: var(--fg);
+  opacity: 0.85;
+}
+.hl-punctuation {
+  color: var(--hl-punctuation, var(--muted));
+}
+
+/* コードブロックのタイトル帯と行番号ガター。 */
+.code-block.has-title {
+  padding-top: 2.4em;
+}
+.code-title {
+  position: absolute;
+  inset: 0 0 auto 0;
+  font-family: var(--mono);
+  font-size: 0.62em;
+  padding: 0.55em 1.1em;
+  color: var(--muted);
+  background: rgba(127, 127, 127, 0.12);
+  border-bottom: 1px solid var(--rule);
+  border-radius: 10px 10px 0 0;
+}
+.code-block.has-ln {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 0.9em;
+}
+.code-block.has-ln > .code-title {
+  flex-basis: 100%;
+}
+.code-gutter {
+  flex: 0 0 auto;
+  font-family: var(--mono);
+  font-size: 0.78em;
+  line-height: 1.6;
+  text-align: right;
+  white-space: pre;
+  user-select: none;
+  color: var(--muted);
+  opacity: 0.55;
+  border-right: 1px solid var(--rule);
+  padding-right: 0.8em;
+}
+.code-block.has-ln > code {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+/* 引用は編集的なプルクオートに。アクセントの太い縦罫＋ごく薄いアクセント地で「声が変わる」ことを示す。
+   文字は --fg(本文色)にする: 6% のアクセント地を重ねても余裕で AA を満たし(--muted だと一部テーマで
+   4.5 を割るため不可)、プルクオートとしての存在感も出る。テストで全テーマ担保。 */
+.slide blockquote {
+  border-left: 0.22em solid var(--accent);
+  padding: 0.35em 0.95em;
+  color: var(--fg);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  border-radius: 0 var(--r-md, 8px) var(--r-md, 8px) 0;
+}
+
+/* 表は「デザインされた図表」として扱う。角丸＋ハイラインの枠に控えめな elevation を重ね、
+   見出し帯・ゼブラ・数字の桁揃え(tabular-nums)で資料らしい精度を出す。配色は据え置き(WCAG維持)。 */
 .slide table {
   border-collapse: collapse;
   font-size: 0.9em;
@@ -465,19 +863,25 @@ body {
   max-width: 100%;
   border-radius: 12px;
   overflow: hidden;
-  box-shadow: 0 0 0 1px var(--rule);
+  box-shadow:
+    0 0 0 1px var(--rule),
+    var(--elev-1);
+  font-variant-numeric: tabular-nums;
 }
 
 .slide th,
 .slide td {
-  padding: 0.55em 1.1em;
+  padding: 0.62em 1.2em;
   text-align: left;
   border-bottom: 1px solid var(--rule);
 }
 
 .slide thead th {
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
   font-weight: 700;
+  font-size: 0.82em;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   border-bottom: 2px solid color-mix(in srgb, var(--accent) 55%, var(--rule));
 }
 
@@ -487,6 +891,11 @@ body {
 
 .slide tbody tr:nth-child(even) td {
   background: color-mix(in srgb, var(--fg) 4%, transparent);
+}
+
+/* 年号など数字の桁を揃える(年表の時チップ。表・数値強調は各要素で tabular-nums 済み)。 */
+.slide .tl-time {
+  font-variant-numeric: tabular-nums;
 }
 
 .slide img {
@@ -604,7 +1013,9 @@ body {
   padding: 3cqh 2.6cqw;
   border-radius: 1.6cqh;
   background: color-mix(in srgb, var(--fg) 3.5%, transparent);
-  box-shadow: inset 0 0 0 1px var(--rule);
+  box-shadow:
+    inset 0 0 0 1px var(--rule),
+    var(--elev-1);
 }
 .grid-cell > :first-child {
   margin-top: 0;
@@ -680,6 +1091,8 @@ body {
   border: 1px solid var(--rule);
   border-top: 0.5cqh solid var(--accent);
   border-radius: 1.6cqh;
+  /* カードは表・グリッドより一段上に持ち上げる(二段階の elevation を実際に使い分ける)。 */
+  box-shadow: var(--elev-2);
 }
 .card > * + * {
   margin-top: 0.55em;
@@ -719,6 +1132,10 @@ body {
 .stage.enter .card {
   animation: card-rise 0.42s var(--ease) both;
   animation-delay: calc(var(--card-i, 0) * 60ms);
+}
+/* transition: none は瞬時切替なので、カード等のレイアウト登場アニメも止める。 */
+.stage[data-transition='none'] .card {
+  animation: none;
 }
 @keyframes card-rise {
   from {
@@ -1227,7 +1644,7 @@ body {
   border-radius: 10px;
   background: var(--ui-panel, #fff);
   box-shadow: 0 10px 34px rgba(0, 0, 0, 0.26);
-  border: 1px solid var(--ui-rule, rgba(0, 0, 0, 0.12));
+  border: 1px solid var(--ui-line, rgba(0, 0, 0, 0.12));
   font-family: var(--ui-sans);
 }
 .ctx-item {
@@ -1241,7 +1658,7 @@ body {
   border: 0;
   border-radius: 6px;
   background: transparent;
-  color: var(--ui-fg, #111);
+  color: var(--ui-ink, #232019);
   font-size: 13px;
   text-align: left;
   cursor: pointer;
@@ -1261,7 +1678,7 @@ body {
 .ctx-sep {
   height: 1px;
   margin: 5px 6px;
-  background: var(--ui-rule, rgba(0, 0, 0, 0.1));
+  background: var(--ui-line, rgba(0, 0, 0, 0.1));
 }
 /* サブメニュー: 親項目ホバーで右に展開。 */
 .ctx-sub {
@@ -1277,7 +1694,7 @@ body {
   border-radius: 10px;
   background: var(--ui-panel, #fff);
   box-shadow: 0 10px 34px rgba(0, 0, 0, 0.26);
-  border: 1px solid var(--ui-rule, rgba(0, 0, 0, 0.12));
+  border: 1px solid var(--ui-line, rgba(0, 0, 0, 0.12));
 }
 .ctx-item.has-sub:hover > .ctx-sub {
   display: flex;
@@ -1553,7 +1970,7 @@ body {
     transform 0.3s var(--ease);
 }
 
-/* いま現れたブロックは静かに立ち上げる。 */
+/* いま現れたブロックは静かに立ち上げる(既定 = rise)。 */
 .frag-current {
   animation: frag-rise 0.42s var(--ease) both;
 }
@@ -1561,6 +1978,73 @@ body {
   from {
     opacity: 0;
     transform: translateY(1.2cqh);
+  }
+}
+
+/* 登場アニメの効果選択(<!-- anim: … --> / frontmatter anim:)。data-anim でフラグメントの入場を分岐する。
+   既定(data-anim 無し)は上の rise。書き出し・サムネイルには .frag-current が付かないので最終状態のまま。 */
+.slide[data-anim='fade'] .frag-current {
+  animation: frag-fade 0.42s var(--ease) both;
+}
+.slide[data-anim='fly'] .frag-current {
+  animation: frag-fly 0.46s var(--ease) both;
+}
+.slide[data-anim='zoom'] .frag-current {
+  animation: frag-zoom 0.42s var(--ease) both;
+}
+.slide[data-anim='wipe'] .frag-current {
+  animation: frag-wipe 0.5s var(--ease) both;
+}
+/* auto = 要素種別で自動に選ぶ(見出し=fade / 本文=fly / 表=wipe / 図・数値=zoom / その他セル=rise)。 */
+.slide[data-anim='auto'] .frag-current {
+  animation: frag-rise 0.42s var(--ease) both;
+}
+.slide[data-anim='auto'] .frag-current:is(h1, h2, h3, h4, h5, h6) {
+  animation: frag-fade 0.42s var(--ease) both;
+}
+.slide[data-anim='auto'] .frag-current:is(p, ul, ol, blockquote, pre) {
+  animation: frag-fly 0.46s var(--ease) both;
+}
+.slide[data-anim='auto'] .frag-current:is(table) {
+  animation: frag-wipe 0.5s var(--ease) both;
+}
+.slide[data-anim='auto'] .frag-current:is(figure, img, .stat, .media-fig) {
+  animation: frag-zoom 0.42s var(--ease) both;
+}
+/* off = 演出なし。フラグメントの入場(.frag-current=段階表示で現れる各ブロック/セル)と、
+   cards レイアウトの入場(.stage.enter .card の card-rise)を止める。 */
+.slide[data-anim='off'] .frag-current,
+.slide[data-anim='off'] .card {
+  animation: none;
+}
+
+@keyframes frag-fade {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes frag-fly {
+  from {
+    opacity: 0;
+    transform: translateY(4.5cqh);
+  }
+}
+@keyframes frag-zoom {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+}
+/* 左→右へ拭うように現す。clip-path は両端とも inset() にする(inset↔none は離散で補間されず
+   途中まで見えないため)。最終状態 inset(0 0 0 0) は無クリップ=完全表示で、書き出しでも安全。 */
+@keyframes frag-wipe {
+  from {
+    clip-path: inset(0 100% 0 0);
+    opacity: 0.5;
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+    opacity: 1;
   }
 }
 
@@ -1862,6 +2346,32 @@ body {
 .ov-cell:hover {
   transform: translateY(-3px);
   box-shadow: 0 0 0 1px var(--ui-accent);
+}
+
+/* ドラッグで並べ替え。掴めることを示すカーソルと、ドロップ位置の挿入バー。 */
+.ov-cell[draggable='true'] {
+  cursor: grab;
+}
+.ov-cell.ov-dragging {
+  opacity: 0.4;
+  cursor: grabbing;
+}
+.ov-cell.ov-drop-before::before,
+.ov-cell.ov-drop-after::after {
+  content: '';
+  position: absolute;
+  top: 6%;
+  bottom: 6%;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--ui-accent);
+  z-index: 2;
+}
+.ov-cell.ov-drop-before::before {
+  left: -5px;
+}
+.ov-cell.ov-drop-after::after {
+  right: -5px;
 }
 
 .ov-thumb {
@@ -2391,7 +2901,8 @@ dl.g-keys dd {
   .panel,
   .overlay,
   .nav,
-  .deck-foot {
+  .deck-foot,
+  .busy {
     display: none !important;
   }
   body,
@@ -2552,4 +3063,148 @@ body.faux-full .deck-root {
   .nav {
     opacity: 0.5;
   }
+}
+
+/* ── 発表者コンソール(別ウィンドウ presenter.html)── */
+/* 周辺のクロムは暗色固定。スライド自体は deck-root が選択テーマの配色を保つ。 */
+.pv-app {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: #14161a;
+  color: #e7e9ee;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+.pv-main {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  gap: 14px;
+  padding: 14px;
+}
+.pv-now {
+  flex: 1 1 62%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: hidden;
+}
+.pv-side {
+  flex: 1 1 38%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: hidden;
+}
+.pv-label {
+  flex: 0 0 auto;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: #9aa3b2;
+}
+.pv-deck {
+  width: 100%;
+  /* 高さ予算 × 縦横比 で最大幅を決めることで、縦長デッキでも横長デッキでも枠内に収める
+     (はみ出し=クリップを防ぐ。本体ビューアの deck-root と同じ手法)。 */
+  max-width: calc((100vh - 150px) * var(--deck-ar-num, 1.7778));
+  aspect-ratio: var(--deck-ar, 16 / 9);
+  margin: 0 auto;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+  flex: 0 0 auto;
+}
+.pv-deck-next {
+  /* 次スライドはサイド列の小枠。高さ予算を抑えて時計・ノートを圧迫しない。 */
+  max-width: calc(34vh * var(--deck-ar-num, 1.7778));
+}
+.pv-banner {
+  flex: 0 0 auto;
+  background: #5b3b00;
+  color: #ffd9a8;
+  padding: 8px 14px;
+  font-size: 13px;
+  text-align: center;
+}
+.pv-clockrow {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex: 0 0 auto;
+}
+.pv-timer {
+  font-size: 30px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.pv-clock {
+  font-size: 16px;
+  color: #9aa3b2;
+  font-variant-numeric: tabular-nums;
+}
+.pv-btn {
+  background: #2a2e37;
+  color: #e7e9ee;
+  border: 1px solid #3a3f4b;
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-size: 14px;
+  cursor: pointer;
+}
+.pv-btn:hover {
+  background: #353a45;
+}
+.pv-mini {
+  margin-left: auto;
+  background: #2a2e37;
+  color: #e7e9ee;
+  border: 1px solid #3a3f4b;
+  border-radius: 8px;
+  padding: 5px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.pv-mini:hover {
+  background: #353a45;
+}
+.pv-notes {
+  flex: 1 1 auto;
+  min-height: 60px;
+  background: #1b1e24;
+  border: 1px solid #2a2e37;
+  border-radius: 10px;
+  padding: 12px 14px;
+  overflow: auto;
+  font-size: 15px;
+  line-height: 1.7;
+}
+.pv-notes > :first-child {
+  margin-top: 0;
+}
+.pv-notes .notes-empty {
+  color: #6b7280;
+}
+.pv-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 16px;
+  background: #0f1013;
+  border-top: 1px solid #2a2e37;
+}
+.pv-pos {
+  font-size: 18px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.pv-step {
+  color: #9aa3b2;
+  font-size: 14px;
+}
+.pv-bar #pv-next-btn {
+  margin-left: auto;
 }

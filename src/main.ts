@@ -1,7 +1,14 @@
 import './style.css';
-import { deleteStartWithMarkers, parseDeck, setBlockMarker, stripRevealDirectiveLines, type BlockMarker, type RevealMode } from './deck';
+import { deckRatio, deleteStartWithMarkers, parseDeck, setBlockMarker, slideRanges, stripRevealDirectiveLines, type BlockMarker, type RevealMode } from './deck';
 import { blockToMd } from './edit';
-import { deckFilename, exportPdf, exportPptx, renderSlidePng, slideImageName } from './export';
+import {
+  deckFilename,
+  exportHtml,
+  exportPdf,
+  exportPptx,
+  renderSlidePng,
+  slideImageName,
+} from './export';
 import {
   applyOverlay,
   clampBox,
@@ -11,7 +18,7 @@ import {
   isTextShape,
   loadOverlay,
   newId,
-  saveOverlay,
+  saveOverlay as saveOverlayRaw,
   shapeLabel,
   slideOverlay,
   type Box,
@@ -19,9 +26,21 @@ import {
   type Shape,
   type VectorKind,
 } from './overlay';
-import { slideHtml } from './render';
+import { deckTitles, slideHtml } from './render';
+import { Annotator } from './annot';
+import { hasPendingMath, typesetMath } from './math';
+import { hasPendingMermaid, resetMermaid, typesetMermaid } from './mermaid';
+import { hasPendingQr, typesetQr } from './qr';
+import { openSync, type SyncMsg } from './sync';
 import { Presenter } from './present';
-import { applyTheme, DEFAULT_THEME_ID, THEMES, themeById } from './themes';
+import {
+  applyTheme,
+  BRAND_VAR_NAMES,
+  DEFAULT_THEME_ID,
+  themeById,
+  themeOverrides,
+  THEMES,
+} from './themes';
 
 const SAMPLE = `---
 title: maku の使い方
@@ -177,6 +196,8 @@ const ICON = {
   share: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="12" r="2.4"/><circle cx="18" cy="6" r="2.4"/><circle cx="18" cy="18" r="2.4"/><path d="M8.1 11l7.8-4M8.1 13l7.8 4"/></svg>',
   theme: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18 3 3 0 0 0 0-6 1.5 1.5 0 0 1 0-3 3 3 0 0 0 0-6z" fill="currentColor" stroke="none"/></svg>',
   help: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 0 1 4.5 1.5c0 1.7-2 2-2 3.5"/><circle cx="12" cy="17.5" r="0.6" fill="currentColor"/></svg>',
+  console:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>',
 };
 
 app.innerHTML = `
@@ -199,6 +220,7 @@ app.innerHTML = `
       <button class="ico" id="theme-btn" data-tip="テーマを選ぶ (T)" aria-label="テーマを選ぶ">${ICON.theme}</button>
       <button class="ico" id="export" data-tip="書き出し: PDF / PPTX / Google (P)" aria-label="書き出し">${ICON.pdf}</button>
       <button class="ico" id="share" data-tip="共有リンクをコピー" aria-label="共有リンクをコピー">${ICON.share}</button>
+      <button class="ico" id="presenter-view" data-tip="発表者ビュー(別ウィンドウ・V)" aria-label="発表者ビューを開く">${ICON.console}</button>
       <button class="ico" id="present" data-tip="全画面で発表 (F)" aria-label="全画面で発表">${ICON.play}</button>
       <button class="ico" id="help-btn" data-tip="ヘルプ (?)" aria-label="ヘルプ">${ICON.help}</button>
     </div>
@@ -386,12 +408,18 @@ theme: ai-hiru-mincho
             <dt>→ / Space</dt><dd>次へ(段階表示も進む)</dd>
             <dt>←</dt><dd>戻る</dd>
             <dt>Home / End</dt><dd>最初 / 最後</dd>
+            <dt>数字 + Enter</dt><dd>その番号のスライドへジャンプ</dd>
+            <dt>Ctrl / ⌘ + Z</dt><dd>取り消し(Shift を足すとやり直し)。直接編集・図形配置・削除も戻せます</dd>
             <dt>F</dt><dd>全画面で発表</dd>
-            <dt>O</dt><dd>スライド一覧</dd>
+            <dt>O</dt><dd>スライド一覧(サムネイルをドラッグで並べ替え)</dd>
             <dt>S</dt><dd>発表者ノート(次スライドのプレビュー・ステップ進捗・タイマーつき)</dd>
+            <dt>V</dt><dd>発表者ビュー(別ウィンドウ。2画面で現スライド・次・ノート・タイマーを手元に)</dd>
             <dt>E</dt><dd>Markdown エディタ</dd>
             <dt>T</dt><dd>テーマ選択</dd>
             <dt>P</dt><dd>書き出し</dd>
+            <dt>B / W</dt><dd>画面を黒 / 白で覆う(注目誘導。もう一度で戻る)</dd>
+            <dt>D / L</dt><dd>手書きペン / レーザーポインタ(C で手書き消去・Esc/同キーで終了)</dd>
+            <dt>A</dt><dd>自動送り(キオスク)の一時停止 / 再開 ※ frontmatter に autoslide</dd>
             <dt>?</dt><dd>このヘルプ</dd>
             <dt>Esc</dt><dd>開いているダイアログ / 全画面 / 図形選択を閉じる(編集パネル・ノートは E / S で切替)</dd>
             <dt>矢印 / Shift+矢印</dt><dd>選択中の図形を微調整 / 大きく</dd>
@@ -431,6 +459,7 @@ theme: ai-hiru-mincho
     <button data-export="pptx">PowerPoint (.pptx)</button>
     <button data-export="gslides">Google スライド用に書き出す</button>
     <button data-export="png">現在のスライドを画像で保存 (.png)</button>
+    <button data-export="html">単体HTML(配布用・サーバー不要)</button>
     <button data-export="md">Markdown を保存</button>
     <button data-export="print">ブラウザで印刷</button>
   </div>
@@ -477,6 +506,8 @@ const deckRoot = $('deck-root');
 const stage = $('stage');
 const mdInput = $<HTMLTextAreaElement>('md');
 const barTitle = $('bar-title');
+// 発表中の手書き注釈/レーザーポインタ(deck-root を覆う透明キャンバス。発表支援専用)。
+const annot = new Annotator(deckRoot);
 
 // 一覧・発表者ノート・各オーバーレイを deck-root の配下へ移す。これらは position:fixed のため
 // 通常表示では変わらず画面全体に出るが、全画面(requestFullscreen(deck-root))のときも
@@ -536,14 +567,19 @@ barActions.addEventListener('click', (e) => {
 window.addEventListener('scroll', hideTip, true);
 window.addEventListener('resize', hideTip);
 
+// 発表者コンソール(別ウィンドウ)との同期チャンネル。未対応環境では null。
+const sync = openSync();
+
 const presenter = new Presenter(
   { stage, progress: $('progress'), counter: $('counter'), notes: $('notes-body'), next: $('notes-next'), step: $('notes-step') },
   (i) => {
     if (location.hash !== `#${i + 1}`) history.replaceState(null, '', urlFor(i + 1));
     const lr = document.getElementById('live-region');
     if (lr) lr.textContent = `スライド ${i + 1} / ${presenter.total}`;
+    annot.clearInk(); // スライドを移ったら前ページの手書きは消す(モードは維持)
   },
   () => decorateStage(),
+  () => broadcastState(), // スライド/ステップが変わるたびに発表者コンソールへ位置を送る
 );
 
 let currentTheme = themeById(readTheme());
@@ -561,9 +597,16 @@ function urlFor(slide1: number): string {
 }
 
 function setTheme(id: string, persist = true): void {
+  const prevDark = currentTheme.dark;
   currentTheme = themeById(id);
   applyTheme(deckRoot, currentTheme);
   applyTheme($('print-deck'), currentTheme);
+  applyBrand(currentMeta); // テーマ適用で消えた accent 上書きを戻す
+  // Mermaid は配色を SVG に焼き込むため、明暗が変わったら描き直す(CSS変数では追従できない)。
+  if (currentTheme.dark !== prevDark) {
+    resetMermaid(stage);
+    void typesetMermaid(stage).then(() => presenter.refit());
+  }
   if (persist) {
     try {
       localStorage.setItem('maku.theme', currentTheme.id);
@@ -571,11 +614,37 @@ function setTheme(id: string, persist = true): void {
       // 保存できなくても表示は反映する
     }
     history.replaceState(null, '', urlFor(presenter.index + 1));
+    broadcastDeck(); // コンソールへテーマ変更を知らせる
+    scheduleSnapshot(); // テーマ変更も取り消し履歴に含める(restore 中は guard で無視)
+  }
+}
+
+// デッキの縦横比(frontmatter size/ratio)を deck-root の CSS 変数に反映する。既定は 16:9。
+function applyAspect(meta: Record<string, string>): void {
+  const { w, h } = deckRatio(meta);
+  deckRoot.style.setProperty('--deck-ar', `${w} / ${h}`);
+  deckRoot.style.setProperty('--deck-ar-num', String(w / h));
+}
+
+// 直近のデッキ meta(テーマ切替時にブランド色上書きを再適用するために保持)。
+let currentMeta: Record<string, string> = {};
+
+// frontmatter のブランド色上書き(accent 等)を表示・印刷に反映する。上書きが無いキーは
+// 一旦テーマ値へ戻してから適用し、前デッキの上書き残りが居座らないようにする。
+function applyBrand(meta: Record<string, string>): void {
+  const ov = themeOverrides(meta);
+  for (const el of [deckRoot, $('print-deck')]) {
+    for (const name of BRAND_VAR_NAMES) {
+      el.style.setProperty(name, ov[name] ?? currentTheme.vars[name] ?? '');
+    }
   }
 }
 
 function rebuild(keepIndex = true): void {
   const deck = parseDeck(mdInput.value);
+  currentMeta = deck.meta;
+  applyAspect(deck.meta);
+  applyBrand(deck.meta);
   // 編集での再描画(keepIndex)は入場アニメを再生しない(選択枠のズレ防止)。読み込み時のみアニメ。
   presenter.setDeck(deck, keepIndex, !keepIndex);
   barTitle.textContent = deck.meta.title ?? '';
@@ -584,6 +653,8 @@ function rebuild(keepIndex = true): void {
   } catch {
     // 保存失敗は無視
   }
+  broadcastDeck(); // 発表者コンソールに本文更新を知らせる
+  scheduleSnapshot(); // 取り消し用に状態(md/overlay)を履歴へ(デバウンス)
 }
 
 // ── スライド直接編集(PowerPoint風の自由配置 + view ⇄ md の双方向) ──
@@ -600,6 +671,155 @@ let editingShapeId = '';
 let editStart = 0;
 let editEnd = 0;
 const overlay = loadOverlay();
+
+// ── 発表者コンソール同期(currentTheme / editingBlock の宣言後に置く) ──
+// 現在位置をコンソールへ送る。go()/setDeck() 中は applySteps が複数回走るため、マイクロタスクで
+// 1回にまとめ、途中の step=1 を送らず最終状態だけを送る。
+let stateQueued = false;
+function broadcastState(): void {
+  if (!sync || stateQueued) return;
+  stateQueued = true;
+  queueMicrotask(() => {
+    stateQueued = false;
+    sync.postMessage({
+      t: 'state',
+      index: presenter.index,
+      step: presenter.currentStep,
+      total: presenter.total,
+    } satisfies SyncMsg);
+  });
+}
+// 本文とテーマをコンソールへ送る。チャンネルを真実とし、URL/フロントマター由来のテーマや
+// localStorage が読めない環境でもコンソールが正しく描画できるようにする。
+function broadcastDeck(): void {
+  sync?.postMessage({ t: 'deck', md: mdInput.value, theme: currentTheme.id } satisfies SyncMsg);
+}
+let consoleOpen = false; // このタブから発表者コンソールを開いたか(複数タブでの誤応答を防ぐ)
+function openPresenterView(): void {
+  const w = window.open('presenter.html', 'maku-presenter', 'width=1180,height=760');
+  if (!w) {
+    toast('ポップアップを許可すると発表者ビューを開けます');
+    return;
+  }
+  if (!sync) toast('このブラウザは発表者ビューの同期に未対応です');
+  consoleOpen = true;
+  // hello を取りこぼした場合の保険として、少し後に現在のデッキ/位置を送り直す。
+  window.setTimeout(() => {
+    broadcastDeck();
+    broadcastState();
+  }, 600);
+}
+if (sync) {
+  sync.onmessage = (e: MessageEvent<SyncMsg>): void => {
+    const m = e.data;
+    // このタブからコンソールを開いていないなら応答しない(複数タブが1つのコマンドに
+    // 一斉反応して背面タブまで動く/状態が競合するのを防ぐ)。
+    if (!consoleOpen) return;
+    if (m.t === 'cmd') {
+      if (editingBlock) return; // 直接編集中はリモート操作で編集を中断しない
+      nav(() => {
+        if (m.cmd === 'next') presenter.next();
+        else if (m.cmd === 'prev') presenter.prev();
+        else if (m.cmd === 'first') presenter.go(0);
+        else if (m.cmd === 'last') presenter.go(presenter.total - 1);
+        else if (m.cmd === 'goto' && Number.isInteger(m.index)) presenter.go(m.index!);
+      });
+    } else if (m.t === 'hello') {
+      // 新しく開いたコンソールへ現在のデッキと位置を送る。
+      broadcastDeck();
+      broadcastState();
+    }
+  };
+}
+
+// ── 取り消し / やり直し(Undo/Redo)──
+// {md, overlay} のスナップショット履歴。直接編集・自由配置・スライド削除など textarea 外の操作にも
+// 取り消しを効かせる。textarea/contenteditable にフォーカス中はネイティブの取り消しを尊重して横取りしない。
+type HistEntry = { md: string; ov: string; theme: string };
+const HIST_CAP = 100;
+let hist: HistEntry[] = [];
+let histIdx = -1;
+let restoring = false;
+let snapTimer = 0;
+
+// overlay 保存を包み、保存のたびにスナップショットを予約する(全 saveOverlay 呼び出しが対象)。
+function saveOverlay(o: typeof overlay): boolean {
+  const ok = saveOverlayRaw(o);
+  scheduleSnapshot();
+  return ok;
+}
+function scheduleSnapshot(): void {
+  if (restoring) return;
+  if (snapTimer) window.clearTimeout(snapTimer);
+  snapTimer = window.setTimeout(() => {
+    snapTimer = 0;
+    snapshot();
+  }, 350);
+}
+function snapshot(): void {
+  if (restoring) return;
+  const cur: HistEntry = { md: mdInput.value, ov: JSON.stringify(overlay), theme: currentTheme.id };
+  const top = hist[histIdx];
+  if (top && top.md === cur.md && top.ov === cur.ov && top.theme === cur.theme) return; // 変化なしは積まない
+  hist = hist.slice(0, histIdx + 1); // やり直し分を捨てる
+  hist.push(cur);
+  if (hist.length > HIST_CAP) hist = hist.slice(hist.length - HIST_CAP);
+  histIdx = hist.length - 1;
+}
+function restore(entry: HistEntry): void {
+  restoring = true;
+  if (snapTimer) {
+    window.clearTimeout(snapTimer);
+    snapTimer = 0;
+  }
+  closeCtxMenu();
+  deselect();
+  if (entry.theme && entry.theme !== currentTheme.id) setTheme(entry.theme, true);
+  mdInput.value = entry.md;
+  for (const k of Object.keys(overlay)) delete overlay[k];
+  Object.assign(overlay, JSON.parse(entry.ov) as typeof overlay);
+  saveOverlayRaw(overlay);
+  rebuild(true);
+  restoring = false;
+}
+// 取り消し/やり直しの前に、進行中の編集とデバウンス待ちの変更をすべて確定して履歴へ積む。
+// これをしないと「直前の編集が未記録のまま」戻って編集が失われる/古い分岐が復活する。
+function flushPending(): void {
+  commitEdit(); // 進行中の直接編集(本文/テキスト図形)を確定し editingBlock を解放
+  if (rebuildTimer) {
+    window.clearTimeout(rebuildTimer);
+    rebuildTimer = 0;
+    if (!editingBlock) {
+      dedupeSlideIds();
+      rebuild(true);
+    }
+  }
+  if (snapTimer) {
+    window.clearTimeout(snapTimer);
+    snapTimer = 0;
+    snapshot();
+  }
+}
+function undo(): void {
+  flushPending();
+  if (histIdx <= 0) {
+    toast('これ以上戻せません');
+    return;
+  }
+  histIdx -= 1;
+  restore(hist[histIdx]!);
+  toast('取り消しました');
+}
+function redo(): void {
+  flushPending();
+  if (histIdx >= hist.length - 1) {
+    toast('やり直す操作がありません');
+    return;
+  }
+  histIdx += 1;
+  restore(hist[histIdx]!);
+  toast('やり直しました');
+}
 
 function rangeOf(el: HTMLElement): [number, number] {
   const m = /^(\d+)-(\d+)$/.exec(el.dataset.src ?? '');
@@ -1291,6 +1511,41 @@ let drag: {
 // 1ジェスチャ中に図形を実際に動かしたか(スワイプ移動と区別するため)。
 let draggedThisGesture = false;
 
+// コードブロックのコピーボタン。キャプチャ段でブロック選択(下の pointerdown)より先に処理する。
+// 発表中・直接編集中を問わず使え、stopPropagation で選択/編集の発火を防ぐ。
+deckRoot.addEventListener(
+  'pointerdown',
+  (e) => {
+    const btn = (e.target as HTMLElement).closest?.('.code-copy');
+    if (!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const code = btn.closest('.code-block')?.querySelector('code');
+    // 行ハイライト時はコードが <div class="cl"> 行に分かれており textContent では改行が消える。
+    // その場合は各行を改行で連結する(通常コードは textContent に生の改行が残る)。
+    const lineDivs = code?.querySelectorAll(':scope > .cl');
+    const text = code
+      ? lineDivs && lineDivs.length
+        ? Array.from(lineDivs)
+            .map((d) => d.textContent ?? '')
+            .join('\n')
+        : (code.textContent ?? '')
+      : '';
+    if (!text) return;
+    const ok = (): void => {
+      btn.classList.add('copied');
+      setTimeout(() => btn.classList.remove('copied'), 1200);
+      toast('コードをコピーしました');
+    };
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).then(ok, () => toast('コピーできませんでした'));
+    } else {
+      toast('コピーできませんでした');
+    }
+  },
+  true,
+);
+
 deckRoot.addEventListener('pointerdown', (e) => {
   if (!liveEdit || presenting) return;
   if (e.button !== 0) return; // 右クリック等は contextmenu に任せる(選択や複数選択を壊さない)
@@ -1708,6 +1963,8 @@ function addFreeImage(src: string, alt: string, at?: { x: number; y: number }): 
   const probe = new Image();
   const place = (ar: number): void => {
     if (!sid) return;
+    // 非同期ロード中に取り消し等で配置先スライドが消えていたら、孤児 overlay を作らない。
+    if (!parseDeck(mdInput.value).slides.some((s) => s.id === sid)) return;
     const o = ensureSlide(overlay, sid);
     const box = imageBox(ar, at);
     const shape: ImageShape = { id: newId(), kind: 'image', src, alt, ar, ...box };
@@ -1831,6 +2088,14 @@ insertBar.addEventListener('click', (e) => {
 
 // 描画のたびに編集の見た目と選択枠を更新する(Presenter から onAfterRender 経由)。
 function decorateStage(): void {
+  // 数式・図は遅延ロードして描画する(描画済みは skip するので毎回呼んでよい)。
+  // 描画でレイアウト(高さ)が変わるため、終わったら収まり直し(refit)を再計算する。
+  void typesetMath($('notes-body'));
+  void typesetMermaid($('notes-body')); // 発表者ノート内の Mermaid 図も描画する
+  void typesetQr($('notes-body')); // ノート内の QR も描画する
+  void Promise.all([typesetMath(stage), typesetMermaid(stage), typesetQr(stage)]).then(() =>
+    presenter.refit(),
+  );
   const enable = liveEdit && !presenting;
   presenter.setAuthoring(enable);
   deckRoot.classList.toggle('live', enable);
@@ -1879,7 +2144,12 @@ document.addEventListener('fullscreenchange', () => {
   if (presenting) {
     commitEdit();
     deselect();
-    if (!wasPresenting) presenter.resetSteps(); // 発表開始時は現在スライドを先頭ステップから
+    if (!wasPresenting) {
+      presenter.resetSteps(); // 発表開始時は現在スライドを先頭ステップから
+      if (presenter.hasAutoAdvance) presenter.setAutoPlay(true); // キオスク自動送りを開始
+    }
+  } else if (wasPresenting) {
+    presenter.setAutoPlay(false); // 発表終了で自動送りを止める
   }
   decorateStage();
 });
@@ -1904,7 +2174,12 @@ function fauxFull(on: boolean): void {
   if (on) {
     commitEdit();
     deselect();
-    if (!was) presenter.resetSteps(); // 発表開始時は現在スライドを先頭ステップから
+    if (!was) {
+      presenter.resetSteps(); // 発表開始時は現在スライドを先頭ステップから
+      if (presenter.hasAutoAdvance) presenter.setAutoPlay(true); // キオスク自動送りを開始
+    }
+  } else if (was) {
+    presenter.setAutoPlay(false); // 発表終了で自動送りを止める
   }
   decorateStage();
 }
@@ -2007,6 +2282,12 @@ function dedupeSlideIds(): boolean {
   dedupeSlideIds(); // 保存済みデッキ内の重複 id を解消(コピペ由来の overlay 共有を防ぐ)
   rebuild(false);
   if (Number.isFinite(start) && start > 0) presenter.go(start);
+  // 取り消しのベースラインを即座に確定(読み込み直後に操作されても初期状態を失わないように)。
+  if (snapTimer) {
+    window.clearTimeout(snapTimer);
+    snapTimer = 0;
+  }
+  snapshot();
 }
 
 // ── ナビ ──
@@ -2058,6 +2339,7 @@ $('edit').addEventListener('click', () => toggle('editor'));
 // 狭い画面では編集がスライド全面を覆うので、その場合だけ閉じたままにする。
 if (window.matchMedia('(min-width: 821px)').matches) toggle('editor', true);
 $('notes-btn').addEventListener('click', () => toggle('notes-panel'));
+$('presenter-view').addEventListener('click', openPresenterView);
 $('overview').addEventListener('click', () => {
   buildOverview();
   toggle('overview-overlay', true);
@@ -2159,12 +2441,26 @@ async function runExport(kind: string): Promise<void> {
     return;
   }
   if (kind === 'print') {
-    doPrint();
+    await doPrint();
     return;
   }
   if (kind === 'md') {
     download(`${deckFilename(deck.meta)}.md`, mdInput.value, 'text/markdown');
     toast('Markdown を保存しました');
+    return;
+  }
+  if (kind === 'html') {
+    setBusy(true, 'HTML を作成中…', 0, 1);
+    try {
+      const html = await exportHtml(deck, currentTheme, overlay);
+      download(`${deckFilename(deck.meta)}.html`, html, 'text/html');
+      toast('単体HTML を書き出しました(ダブルクリックで再生)');
+    } catch (err) {
+      toast('HTML の書き出しに失敗しました');
+      console.error(err);
+    } finally {
+      setBusy(false);
+    }
     return;
   }
   if (kind === 'png') {
@@ -2201,15 +2497,35 @@ async function runExport(kind: string): Promise<void> {
   }
 }
 
-function doPrint(): void {
+async function doPrint(): Promise<void> {
   commitEdit(); // 進行中の編集(本文/テキスト箱)を確定してから出力(古い内容で印刷しない)
   const deck = parseDeck(mdInput.value);
   const host = $('print-deck');
-  host.innerHTML = deck.slides.map((s) => `<div class="print-page">${slideHtml(s)}</div>`).join('');
+  const titles = deckTitles(deck.slides);
+  host.innerHTML = deck.slides
+    .map(
+      (s, i) =>
+        `<div class="print-page">${slideHtml(s, { meta: deck.meta, index: i, total: deck.slides.length, titles })}</div>`,
+    )
+    .join('');
   // 自由配置(テキスト/図形/画像)も印刷に反映する。
   host.querySelectorAll<HTMLElement>('.print-page > .slide').forEach((el, i) => {
     applyOverlay(el, slideOverlay(overlay, deck.slides[i]?.id ?? ''));
   });
+  // 数式(KaTeX)と図(Mermaid)を先に描画してから印刷する。未描画のままだと生の $…$ や
+  // mermaid ソースがそのまま PDF に焼き付いてしまう。どちらも DOM のレイアウトに依存せず
+  // 描画できるため、print-deck が画面上では display:none でも問題なく実体化できる。
+  // 数式・図が無いデッキでは即座に返り、KaTeX/Mermaid の遅延チャンクも読み込まれない。
+  if (hasPendingMath(host) || hasPendingMermaid(host) || hasPendingQr(host)) {
+    setBusy(true, '印刷用に数式・図を描画中…', 0, 1);
+    try {
+      await typesetMath(host);
+      await typesetMermaid(host);
+      await typesetQr(host);
+    } finally {
+      setBusy(false);
+    }
+  }
   window.print();
 }
 
@@ -2329,22 +2645,94 @@ function flash(btn: HTMLElement): void {
 }
 
 // ── 一覧 ──
+// 一覧での並べ替え。表示スライド from を、表示位置 insertPos の直前へ移す(insertPos は元の表示配列基準、
+// 0..件数)。隠し/空スライドも含む全 segment を操作対象にして取りこぼさず、安定ID付きの図形も追従する。
+function reorderSlides(from: number, insertPos: number): void {
+  if (presenting) return;
+  if (insertPos === from || insertPos === from + 1) return; // 同じ位置=何もしない
+  const md = mdInput.value.replace(/\r\n?/g, '\n');
+  const { bodyStart, slides: ranges } = slideRanges(md);
+  if (!ranges.length) return;
+  const visIdx: number[] = [];
+  ranges.forEach((r, i) => {
+    if (r.visible) visIdx.push(i);
+  });
+  if (from < 0 || from >= visIdx.length || insertPos < 0 || insertPos > visIdx.length) return;
+  const fromFull = visIdx[from]!;
+  const beforeFull = insertPos < visIdx.length ? visIdx[insertPos]! : ranges.length;
+  // prefix はフロントマター(本文開始オフセット)で切り出す。先頭空スライドでも欠落させない。
+  const prefix = md.slice(0, bodyStart);
+  const segs = ranges.map((r) => md.slice(r.srcStart, r.srcEnd));
+  const moved = segs.splice(fromFull, 1)[0]!;
+  const insertAt = beforeFull > fromFull ? beforeFull - 1 : beforeFull;
+  segs.splice(insertAt, 0, moved);
+  const newMd = prefix + segs.join('\n\n---\n\n') + '\n';
+  if (newMd === md) return;
+  commitEdit();
+  deselect();
+  mdInput.value = newMd;
+  rebuild(true); // 再描画・保存・コンソール同期・取り消し履歴へ(1手で戻せる)
+  buildOverview();
+  toast('スライドを並べ替えました');
+}
+
+let dragFrom = -1;
 function buildOverview(): void {
   commitEdit(); // 進行中の編集を確定してからサムネイル化(古い/プレースホルダ表示を防ぐ)
   const deck = parseDeck(mdInput.value);
   const grid = $('overview-grid');
   grid.innerHTML = '';
+  dragFrom = -1; // 再構築時に進行中ドラッグ状態を必ずリセット(古い index の流用を防ぐ)
+  const titles = deckTitles(deck.slides);
+  const canReorder = !presenting && deck.slides.length > 1;
   deck.slides.forEach((s, i) => {
     const cell = document.createElement('button');
     cell.className = 'ov-cell';
     cell.style.setProperty('--i', String(i));
-    cell.innerHTML = `<div class="ov-thumb">${slideHtml(s)}</div><span class="ov-no">${i + 1}</span>`;
+    // 一覧でも本表示と同じクローム(ヘッダ/フッタ/ページ番号)と目次を出す(全スライド一律)。
+    const thumbCtx = { meta: deck.meta, index: i, total: deck.slides.length, titles };
+    cell.innerHTML = `<div class="ov-thumb">${slideHtml(s, thumbCtx)}</div><span class="ov-no">${i + 1}</span>`;
     const thumbSlide = cell.querySelector<HTMLElement>('.ov-thumb > .slide');
     if (thumbSlide) applyOverlay(thumbSlide, slideOverlay(overlay, s.id ?? '')); // 自由配置(テキスト/図形/画像)も一覧に出す
     cell.addEventListener('click', () => {
       nav(() => presenter.go(i));
       toggle('overview-overlay', false);
     });
+    // ── ドラッグで並べ替え(マウス/トラックパッド)──
+    if (canReorder) {
+      cell.draggable = true;
+      cell.dataset.idx = String(i);
+      cell.addEventListener('dragstart', (e) => {
+        dragFrom = i;
+        cell.classList.add('ov-dragging');
+        if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+      });
+      cell.addEventListener('dragend', () => {
+        dragFrom = -1;
+        grid.querySelectorAll('.ov-cell').forEach((c) => c.classList.remove('ov-drop-before', 'ov-drop-after', 'ov-dragging'));
+      });
+      cell.addEventListener('dragover', (e) => {
+        if (dragFrom < 0) return;
+        e.preventDefault();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+        const r = cell.getBoundingClientRect();
+        const after = e.clientX > r.left + r.width / 2;
+        cell.classList.toggle('ov-drop-after', after);
+        cell.classList.toggle('ov-drop-before', !after);
+      });
+      cell.addEventListener('dragleave', () => cell.classList.remove('ov-drop-before', 'ov-drop-after'));
+      cell.addEventListener('drop', (e) => {
+        if (dragFrom < 0) return;
+        e.preventDefault();
+        e.stopPropagation(); // deck-root の画像ドロップ等へバブルさせない
+        const from = dragFrom;
+        dragFrom = -1; // 消費して即クリア(dragend が来なくても古い index を残さない)
+        cell.classList.remove('ov-drop-before', 'ov-drop-after');
+        const r = cell.getBoundingClientRect();
+        const after = e.clientX > r.left + r.width / 2;
+        reorderSlides(from, i + (after ? 1 : 0));
+      });
+    }
     grid.appendChild(cell);
   });
 }
@@ -2400,7 +2788,34 @@ $('timer-reset').addEventListener('click', () => {
   $('timer-reset').blur();
 });
 
+// ── 画面ブラックアウト/ホワイトアウト(発表中の注目誘導。B=黒 / W=白) ──
+// 全画面(requestFullscreen は deck-root)でも覆えるよう deckRoot のサブツリーに置く。
+let blanked: 'black' | 'white' | null = null;
+let autoPlayBeforeBlank = false; // 暗転前に自動送りが動いていたか(復帰時に戻す)
+const blankEl = document.createElement('div');
+blankEl.className = 'screen-blank';
+blankEl.hidden = true;
+deckRoot.appendChild(blankEl);
+function setBlank(mode: 'black' | 'white' | null): void {
+  const wasBlank = blanked !== null;
+  blanked = mode;
+  blankEl.hidden = !mode;
+  if (mode) blankEl.dataset.mode = mode;
+  // 暗転/白転の間は自動送り(キオスク)を止め、解除したら元の状態に戻す。
+  if (mode && !wasBlank) {
+    autoPlayBeforeBlank = presenter.autoPlaying;
+    if (autoPlayBeforeBlank) presenter.setAutoPlay(false);
+  } else if (!mode && wasBlank && autoPlayBeforeBlank) {
+    presenter.setAutoPlay(true);
+    autoPlayBeforeBlank = false;
+  }
+}
+blankEl.addEventListener('pointerdown', () => setBlank(null));
+
 // ── キーボード ──
+// 数字を打って Enter でそのスライド番号へ飛ぶ(発表中の Q&A・長いデッキ向け)。
+let jumpBuf = '';
+let jumpTimer = 0;
 const anyOverlayOpen = (): boolean =>
   !$('overview-overlay').hidden ||
   !$('theme-modal').hidden ||
@@ -2422,11 +2837,36 @@ window.addEventListener('keydown', (ev) => {
   if (target?.closest('input, textarea, select, a[href], button, [contenteditable=""], [contenteditable="true"]')) {
     return;
   }
+  // 取り消し / やり直し(textarea 等にフォーカス中は上の return で素通し=ネイティブ取り消しを尊重)。
+  // 発表中は誤って本文を巻き戻さないよう無効。
+  if ((ev.ctrlKey || ev.metaKey) && !ev.altKey && (ev.key === 'z' || ev.key === 'Z')) {
+    ev.preventDefault();
+    if (!presenting && !anyOverlayOpen()) {
+      if (ev.shiftKey) redo();
+      else undo();
+    }
+    return;
+  }
+  if ((ev.ctrlKey || ev.metaKey) && !ev.altKey && (ev.key === 'y' || ev.key === 'Y')) {
+    ev.preventDefault();
+    if (!presenting && !anyOverlayOpen()) redo();
+    return;
+  }
   if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
 
-  // Escape(オーバーレイが無いとき): 右クリックメニュー → 全画面 → 選択解除 の順で閉じる。
+  // ブラックアウト/ホワイトアウト中は、どのキーでも解除する(B/W は反対色への切替も可)。
+  if (blanked) {
+    ev.preventDefault();
+    if (ev.key === 'b' || ev.key === 'B') setBlank(blanked === 'black' ? null : 'black');
+    else if (ev.key === 'w' || ev.key === 'W') setBlank(blanked === 'white' ? null : 'white');
+    else setBlank(null);
+    return;
+  }
+
+  // Escape(オーバーレイが無いとき): 右クリックメニュー → 注釈解除 → 全画面 → 選択解除 の順で閉じる。
   if (ev.key === 'Escape') {
     if (!ctxMenu.hidden) closeCtxMenu();
+    else if (annot.active) annot.setMode('off'); // 手書き/レーザーを抜ける(全画面より先に)
     else if (faux) fauxFull(false);
     else if (sel) deselect();
     return;
@@ -2453,6 +2893,26 @@ window.addEventListener('keydown', (ev) => {
       }
       if (/^[a-zA-Z?]$/.test(ev.key)) return; // 図形選択中はレターのショートカットを誤発火させない
     }
+  }
+
+  // 数字+Enter でスライド番号へジャンプ。数字は一定時間で自動的にリセットする。
+  if (/^[0-9]$/.test(ev.key)) {
+    ev.preventDefault();
+    jumpBuf += ev.key;
+    if (jumpTimer) window.clearTimeout(jumpTimer);
+    jumpTimer = window.setTimeout(() => {
+      jumpBuf = '';
+    }, 2000);
+    toast(`スライド ${jumpBuf} へ (Enter で移動)`);
+    return;
+  }
+  if (ev.key === 'Enter' && jumpBuf) {
+    ev.preventDefault();
+    const n = Math.max(1, Math.min(presenter.total, parseInt(jumpBuf, 10)));
+    jumpBuf = '';
+    if (jumpTimer) window.clearTimeout(jumpTimer);
+    nav(() => presenter.go(n - 1));
+    return;
   }
 
   // ナビゲーション・ヘルプ(常時有効)。
@@ -2493,6 +2953,49 @@ window.addEventListener('keydown', (ev) => {
     case 's':
     case 'S':
       toggle('notes-panel');
+      return;
+    case 'b':
+    case 'B':
+      setBlank('black');
+      return;
+    case 'w':
+    case 'W':
+      setBlank('white');
+      return;
+    case 'd':
+    case 'D':
+      annot.toggle('pen'); // 手書きペンのオン/オフ
+      toast(annot.active ? 'ペン: 描けます(C で消去 / D で終了)' : 'ペンを終了しました');
+      return;
+    case 'l':
+    case 'L':
+      annot.toggle('laser'); // レーザーポインタのオン/オフ
+      toast(annot.active ? 'レーザーポインタ ON(L で終了)' : 'レーザーを終了しました');
+      return;
+    case 'c':
+    case 'C':
+      annot.clearInk(); // 手書きを消す
+      return;
+    case 'a':
+    case 'A': {
+      // 自動送り(キオスク)の一時停止/再開。設定が無いデッキでは案内だけ出す。
+      if (!presenter.hasAutoAdvance) {
+        toast('自動送りは未設定です(frontmatter に autoslide: 5 など)');
+        return;
+      }
+      // 直接編集中(発表外)はタイマーが動かないので、誤解を招くトーストを出さず案内する。
+      if (!presenting && liveEdit) {
+        toast('自動送りは発表中(F)に動きます');
+        return;
+      }
+      const on = !presenter.autoPlaying;
+      presenter.setAutoPlay(on);
+      toast(on ? '自動送りを再開しました' : '自動送りを一時停止しました');
+      return;
+    }
+    case 'v':
+    case 'V':
+      openPresenterView(); // 発表者ビュー(別ウィンドウ)を開く
       return;
   }
 

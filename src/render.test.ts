@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { parseDeck } from './deck';
-import { slideClassName, slideHtml, slideHtmlMapped, slideStyleAttr } from './render';
+import {
+  deckTitles,
+  slideClassName,
+  slideHtml,
+  slideHtmlMapped,
+  slideStyleAttr,
+} from './render';
 
 function slide(md: string) {
   return parseDeck(md).slides[0]!;
@@ -165,5 +171,101 @@ describe('render', () => {
     const html = slideHtmlMapped(slide('<!-- layout: split -->\n<!-- incremental -->\nA\n\nB\n==='));
     expect(html).not.toContain('===');
     expect(html).not.toContain('<p>=</p>');
+  });
+
+  it('ctx を渡すとヘッダ/フッタ/ページ番号(クローム)を付ける', () => {
+    const deck = parseDeck('---\nfooter: maku 2026\npaginate: true\nheader: 社外秘\n---\n# A\n\n---\n\n# B');
+    const html = slideHtml(deck.slides[0]!, { meta: deck.meta, index: 0, total: 2 });
+    expect(html).toContain('class="slide-footer"');
+    expect(html).toContain('maku 2026');
+    expect(html).toContain('class="slide-header"');
+    expect(html).toContain('class="slide-pageno"');
+    expect(html).toContain('1 / 2');
+  });
+
+  it('ctx なしならクロームは付かない(後方互換)', () => {
+    const deck = parseDeck('---\nfooter: x\npaginate: true\n---\n# A');
+    expect(slideHtml(deck.slides[0]!)).not.toContain('slide-footer');
+    expect(slideHtml(deck.slides[0]!)).not.toContain('slide-pageno');
+  });
+
+  it('per-slide の footer/paginate 上書きが効く', () => {
+    const deck = parseDeck('---\nfooter: 既定\npaginate: true\n---\n# A\n<!-- footer: 個別 -->\n<!-- paginate: false -->');
+    const html = slideHtml(deck.slides[0]!, { meta: deck.meta, index: 0, total: 1 });
+    expect(html).toContain('個別');
+    expect(html).not.toContain('既定');
+    expect(html).not.toContain('slide-pageno');
+  });
+});
+
+describe('目次(TOC)', () => {
+  const md = '# はじめに\n<!-- toc -->\n\n---\n\n# 設計\n本文\n\n---\n\n# まとめ';
+
+  it('deckTitles は見出しのあるスライドを連番で集め、TOC スライド自身は除外する', () => {
+    const deck = parseDeck(md);
+    const titles = deckTitles(deck.slides);
+    expect(titles).toEqual([
+      { n: 1, title: '設計' },
+      { n: 2, title: 'まとめ' },
+    ]);
+  });
+
+  it('toc スライドは全見出しを番号付きリストで描く', () => {
+    const deck = parseDeck(md);
+    const titles = deckTitles(deck.slides);
+    const html = slideHtml(deck.slides[0]!, { meta: deck.meta, index: 0, total: deck.slides.length, titles });
+    expect(html).toContain('<ol class="toc">');
+    expect(html).toContain('class="toc-no">1<');
+    expect(html).toContain('設計');
+    expect(html).toContain('まとめ');
+    // 見出し本文(はじめに)も残る
+    expect(html).toContain('はじめに');
+  });
+
+  it('toc でないスライドには TOC を出さない / titles 無しでも落ちない', () => {
+    const deck = parseDeck(md);
+    const titles = deckTitles(deck.slides);
+    expect(slideHtml(deck.slides[1]!, { meta: deck.meta, index: 1, total: 3, titles })).not.toContain('class="toc"');
+    expect(slideHtml(deck.slides[0]!, { meta: deck.meta, index: 0, total: 3 })).not.toContain('<ol class="toc">');
+  });
+
+  it('見出し内のインライン書式はエスケープして描く', () => {
+    const deck = parseDeck('# 目次\n<!-- toc -->\n\n---\n\n# `code` と **強調**');
+    const titles = deckTitles(deck.slides);
+    const html = slideHtml(deck.slides[0]!, { meta: deck.meta, index: 0, total: 2, titles });
+    expect(html).toContain('toc-title');
+    expect(html).toContain('<code>code</code>');
+    expect(html).not.toContain('<script');
+  });
+
+  it('コードフェンス内の # 行は目次に拾わない(描画と一致)', () => {
+    const md = '# 目次\n<!-- toc -->\n\n---\n\n```python\n# config setup\n```\n\n---\n\n# 本物の見出し';
+    const deck = parseDeck(md);
+    const titles = deckTitles(deck.slides);
+    // フェンスだけのスライドは見出し無し扱いで除外、本物の見出しだけ残る
+    expect(titles).toEqual([{ n: 1, title: '本物の見出し' }]);
+  });
+
+  it('見出し抽出は描画と同じ規則(行頭・末尾の # は残す)', () => {
+    const deck = parseDeck('<!-- toc -->\n# 目次\n\n---\n\n# Foo #');
+    const titles = deckTitles(deck.slides);
+    expect(titles).toEqual([{ n: 1, title: 'Foo #' }]);
+  });
+});
+
+describe('登場アニメ data-anim', () => {
+  it('anim 指定スライドは .slide に data-anim を出す', () => {
+    const s = slide('<!-- anim: zoom -->\n# x');
+    expect(slideHtmlMapped(s)).toContain('data-anim="zoom"');
+    expect(slideHtml(s)).toContain('data-anim="zoom"');
+  });
+  it('無指定では data-anim を出さない(従来どおり既定の rise)', () => {
+    expect(slideHtmlMapped(slide('# x'))).not.toContain('data-anim');
+    expect(slideHtml(slide('# x'))).not.toContain('data-anim');
+  });
+  it('frontmatter anim: が ctx.meta 経由で既定になる', () => {
+    const deck = parseDeck('---\nanim: fade\n---\n\n# x');
+    const ctx = { meta: deck.meta, index: 0, total: 1 };
+    expect(slideHtml(deck.slides[0]!, ctx)).toContain('data-anim="fade"');
   });
 });

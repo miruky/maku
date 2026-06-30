@@ -1,5 +1,30 @@
 import { describe, expect, it } from 'vitest';
-import { THEMES, themeById, varContrast, DEFAULT_THEME_ID } from './themes';
+import {
+  THEMES,
+  themeById,
+  themeOverrides,
+  varContrast,
+  DEFAULT_THEME_ID,
+  parseHsl,
+  contrastRatio,
+} from './themes';
+
+describe('themeOverrides', () => {
+  it('accent を妥当な色のときだけ --accent に上書きする', () => {
+    expect(themeOverrides({ accent: '#e23' })).toEqual({ '--accent': '#e23' });
+    expect(themeOverrides({ accent: '#ee2233' })).toEqual({ '--accent': '#ee2233' });
+    expect(themeOverrides({ accent: 'rgb(10, 20, 30)' })).toEqual({ '--accent': 'rgb(10, 20, 30)' });
+    expect(themeOverrides({ accent: 'hsl(200 50% 40%)' })).toEqual({ '--accent': 'hsl(200 50% 40%)' });
+    expect(themeOverrides({ accent: 'rebeccapurple' })).toEqual({ '--accent': 'rebeccapurple' });
+  });
+  it('色でない/注入を狙う値は無視する', () => {
+    expect(themeOverrides({})).toEqual({});
+    expect(themeOverrides({ accent: '' })).toEqual({});
+    expect(themeOverrides({ accent: 'red; background:url(x)' })).toEqual({});
+    expect(themeOverrides({ accent: '#ax' })).toEqual({});
+    expect(themeOverrides({ accent: 'expression(alert(1))' })).toEqual({});
+  });
+});
 
 describe('THEMES', () => {
   it('ちょうど264種類ある(44系統 × 昼夜 × 3書体)', () => {
@@ -47,6 +72,35 @@ describe('THEMES', () => {
   it('全テーマで本文色が accent-soft 上でも AA(対比バッジ等の文字用)', () => {
     for (const t of THEMES) {
       expect(varContrast(t, '--fg', '--accent-soft'), `${t.id} fg/accent-soft`).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it('引用(blockquote)の本文(fg)が薄いアクセント地(6%)の上でも AA を保つ', () => {
+    // .slide blockquote は background: color-mix(in srgb, accent 6%, transparent) を --bg の上に重ね、
+    // 文字色は --fg。sRGB 合成での実効地色 = bg*0.94 + accent*0.06。その上で fg が 4.5 を割らないことを担保する。
+    // (--muted だと koke-hiru-mincho 等で 4.5 を割るため、引用は --fg を使う。)
+    const mix = (a: [number, number, number], b: [number, number, number], t: number) =>
+      [a[0] * (1 - t) + b[0] * t, a[1] * (1 - t) + b[1] * t, a[2] * (1 - t) + b[2] * t] as [
+        number,
+        number,
+        number,
+      ];
+    for (const t of THEMES) {
+      const eff = mix(parseHsl(t.vars['--bg']!), parseHsl(t.vars['--accent']!), 0.06);
+      expect(contrastRatio(parseHsl(t.vars['--fg']!), eff), `${t.id} blockquote fg/tint`).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it('全テーマでコード配色(ハイライトのトークン色)が --code-bg 上で AA を満たす', () => {
+    const tokens = [
+      '--hl-keyword', '--hl-string', '--hl-number', '--hl-function',
+      '--hl-type', '--hl-literal', '--hl-deleted', '--hl-comment', '--hl-punctuation',
+    ];
+    for (const t of THEMES) {
+      for (const key of tokens) {
+        expect(t.vars[key], `${t.id} に ${key}`).toBeTruthy();
+        expect(varContrast(t, key, '--code-bg'), `${t.id} ${key}/code-bg`).toBeGreaterThanOrEqual(4.5);
+      }
     }
   });
 });

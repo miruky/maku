@@ -71,6 +71,67 @@ export interface Slide {
   // <!-- id: xxx --> で付与する安定ID。自由配置(overlay)の図形をこのIDで紐付け、
   // スライドを並べ替え/削除しても図形が追従するようにする(無指定なら undefined)。
   id?: string;
+  // <!-- transition: fade|slide|zoom|none --> でスライド入場の演出を上書き(無指定はデッキ既定)。
+  transition?: string;
+  // <!-- footer: … --> / <!-- header: … --> でこのスライドのヘッダ/フッタ文言を上書き(無指定はデッキ既定)。
+  footer?: string;
+  header?: string;
+  // <!-- paginate: true|false --> でこのスライドのページ番号表示を上書き(無指定はデッキ既定)。
+  paginate?: boolean;
+  // <!-- toc --> を置くと、全スライドの見出しから目次(アジェンダ)を自動生成して表示する。
+  toc?: boolean;
+  // <!-- autoslide: 5 --> でこのスライドの自動送り待ち時間(ms)を上書き。0 はこのスライドで停止。
+  autoslide?: number;
+  // <!-- hide --> を置くと、このスライドは発表・一覧・書き出しから除外される(原稿には残る)。
+  hidden?: boolean;
+  // <!-- anim: rise|fade|fly|zoom|wipe|auto|off --> で、このスライドの段階表示フラグメント/入場の
+  // 演出を上書き(無指定はデッキ既定 anim:、それも無ければ従来どおり rise)。値は許可リストで検証する。
+  anim?: string;
+}
+
+// 受理するスライド遷移の種類。
+export const TRANSITIONS = ['none', 'fade', 'slide', 'zoom'] as const;
+export type Transition = (typeof TRANSITIONS)[number];
+
+// 受理する登場アニメ(段階表示フラグメント/入場)の効果。rise=既定(下から立ち上がる)、
+// off=演出なし、auto=要素種別で自動に選ぶ。CSS は .slide[data-anim=…] でこれを分岐する。
+export const ANIM_EFFECTS = ['off', 'none', 'rise', 'fade', 'fly', 'zoom', 'wipe', 'auto'] as const;
+export type AnimEffect = (typeof ANIM_EFFECTS)[number];
+
+// スライドの登場アニメ効果を解決する。スライド個別(<!-- anim: … -->)→ デッキ既定(frontmatter anim:)
+// の順。'none' は 'off' に正規化する。未指定/不正は '' を返し、呼び出し側は従来既定(rise)に委ねる
+// (= data-anim を出さず、CSS の既定 .frag-current が rise する)。
+export function resolveAnim(slide: Slide, meta: Record<string, string>): string {
+  const raw = (slide.anim ?? meta.anim ?? '').trim().toLowerCase();
+  if (!(ANIM_EFFECTS as readonly string[]).includes(raw)) return '';
+  return raw === 'none' ? 'off' : raw;
+}
+
+// frontmatter の size:/ratio:/aspect: からデッキの縦横比を得る。"16:9"・"4:3"・"16x9"・
+// "1920x1080"・"16/9" を受理。未指定/不正は 16:9。表示(CSS)と書き出し(W/H)の両方で使う。
+export function deckRatio(meta: Record<string, string>): { w: number; h: number } {
+  const raw = (meta.size ?? meta.ratio ?? meta.aspect ?? '').trim().toLowerCase();
+  const m = /^(\d+(?:\.\d+)?)\s*[:x/]\s*(\d+(?:\.\d+)?)$/.exec(raw);
+  if (m) {
+    const w = Number(m[1]);
+    const h = Number(m[2]);
+    if (w > 0 && h > 0 && Number.isFinite(w) && Number.isFinite(h)) return { w, h };
+  }
+  return { w: 16, h: 9 };
+}
+
+// 自動送り(キオスク)の待ち時間をミリ秒で返す。"5"/"5s" → 5000、"500ms" → 500、
+// "off"/"none"/"0" → 0(このスライドは自動送りしない)、不正値 → undefined(無指定扱い)。
+// 既定の単位は秒(利用者が秒で考えられるように)。frontmatter と <!-- autoslide --> で共有。
+export function parseAutoslideMs(value: string): number | undefined {
+  const v = value.trim().toLowerCase();
+  if (v === '' ) return undefined;
+  if (v === 'off' || v === 'none' || v === 'no' || v === 'false') return 0;
+  const m = /^(\d+(?:\.\d+)?)\s*(ms|s)?$/.exec(v);
+  if (!m) return undefined;
+  const n = Number(m[1]);
+  if (!Number.isFinite(n)) return undefined;
+  return m[2] === 'ms' ? Math.round(n) : Math.round(n * 1000);
 }
 
 export interface Deck {
@@ -121,7 +182,7 @@ const FLOW_FALLBACK_LAYOUTS: Layout[] = ['split', 'grid'];
 // フェンスの内側)」を返す判定器を作る。CommonMark に倣い、開いたフェンスは同じ文字種・開始以上の
 // 長さの行でのみ閉じる。スライド分割・ディレクティブ解析・GUI のディレクティブ除去で同じ規則を共有し、
 // 「コード例の中の --- や <!-- ... --> を区切り/指示と誤解しない」挙動を一致させる。
-function fenceScanner(): (text: string) => boolean {
+export function fenceScanner(): (text: string) => boolean {
   const re = /^[ \t]*(`{3,}|~{3,})/;
   let open: { ch: string; len: number } | null = null;
   return (text) => {
@@ -154,12 +215,42 @@ export function parseDeck(source: string): Deck {
   const all = toLines(text);
   const { meta, bodyStart } = extractFrontmatter(all);
   const body = all.slice(bodyStart);
-  const chunks = splitSlides(body);
-  const slides = chunks.map(parseSlide).filter((s) => s.content.trim() !== '' || s.notes !== '');
+  const chunks = splitSlides(body, headingDividerLevel(meta));
+  // <!-- hide --> のスライドはデッキから除外する(発表・一覧・書き出し対象外。原稿には残る)。
+  // パース後に落とすだけなので、残るスライドの絶対オフセット(直接編集の data-src)はずれない。
+  const slides = chunks
+    .map(parseSlide)
+    .filter((s) => (s.content.trim() !== '' || s.notes !== '') && !s.hidden);
   if (slides.length === 0) {
     slides.push(parseSlide(body));
   }
   return { meta, slides };
+}
+
+// 並べ替え用に、全スライド(隠し・空も含む)の原文範囲と表示可否を返す。visible は parseDeck の
+// フィルタ(空でなく hidden でない)と一致させるので、visible だけ並べると deck.slides と同順になる。
+// これを使えば、表示スライドの並べ替え時も隠し/空スライドの原文を取りこぼさずに保てる。
+export interface SlideRange {
+  srcStart: number;
+  srcEnd: number;
+  visible: boolean;
+}
+// bodyStart は本文(フロントマターの後)が始まる文字オフセット。並べ替えの際の prefix(=フロントマター)
+// はこれで切り出す。先頭が空スライド(直後が ---)のとき srcStart は 0 になり得るため、スライド範囲から
+// prefix を導くとフロントマターを丸ごと失う。bodyStart を別に返してそれを防ぐ。
+export function slideRanges(source: string): { bodyStart: number; slides: SlideRange[] } {
+  const text = source.replace(/\r\n?/g, '\n');
+  const all = toLines(text);
+  const { meta, bodyStart } = extractFrontmatter(all);
+  const bodyOffset = bodyStart < all.length ? all[bodyStart]!.offset : text.length;
+  const slides = splitSlides(all.slice(bodyStart), headingDividerLevel(meta))
+    .map(parseSlide)
+    .map((s) => ({
+      srcStart: s.srcStart,
+      srcEnd: s.srcEnd,
+      visible: (s.content.trim() !== '' || s.notes !== '') && !s.hidden,
+    }));
+  return { bodyStart: bodyOffset, slides };
 }
 
 // 文字列を、各行の絶対オフセット付きの行配列にする。
@@ -194,17 +285,47 @@ function extractFrontmatter(all: SourceLine[]): {
   return { meta, bodyStart: close + 1 };
 }
 
-function splitSlides(body: SourceLine[]): SourceLine[][] {
+// frontmatter の headingDivider / slideDividers から、スライド分割の見出しレベル(1-6)を得る。
+// "2" のような数値、または "##" のようなハッシュ列を受理する。未指定/不正は 0(分割しない)。
+function headingDividerLevel(meta: Record<string, string>): number {
+  const raw = (meta.headingdivider ?? meta.slidedividers ?? meta['heading-divider'] ?? '').trim();
+  if (!raw) return 0;
+  if (/^#+$/.test(raw)) return Math.min(raw.length, 6);
+  const n = parseInt(raw, 10);
+  return Number.isInteger(n) && n >= 1 && n <= 6 ? n : 0;
+}
+
+// 本文を単独行 --- でスライドに分割する。headingLevel>0 のときは、指定レベル以下の見出し行の
+// 直前でも新しいスライドを始める(フラットな見出しの並びを手作業の --- なしでデッキにする)。
+// コードフェンス内の --- / 見出しは分割に使わない(コード例を壊さない)。
+function splitSlides(body: SourceLine[], headingLevel = 0): SourceLine[][] {
   const out: SourceLine[][] = [];
   let buf: SourceLine[] = [];
-  const protectedLine = fenceScanner(); // コードフェンス内の --- では分割しない(幻のスライド/原文破壊を防ぐ)
+  const protectedLine = fenceScanner();
   for (const ln of body) {
-    if (!protectedLine(ln.text) && /^\s*---\s*$/.test(ln.text)) {
+    const prot = protectedLine(ln.text);
+    if (!prot && /^\s*---\s*$/.test(ln.text)) {
       out.push(buf);
       buf = [];
-    } else {
-      buf.push(ln);
+      continue;
     }
+    if (!prot && headingLevel > 0) {
+      const hm = /^(#{1,6})\s/.exec(ln.text);
+      if (hm && hm[1]!.length <= headingLevel) {
+        // 末尾の「空行＋ディレクティブ/マーカーのコメント行」は、見出しの直前に書かれた=次スライドに
+        // 属する指示なので、前スライドに残さず次のバッファへ持ち越す(手動 --- と同じ直感に合わせる)。
+        const carry: SourceLine[] = [];
+        while (buf.length) {
+          const t = buf[buf.length - 1]!.text.trim();
+          if (t === '' || /^<!--.*-->$/.test(t)) carry.unshift(buf.pop()!);
+          else break;
+        }
+        // 本文ブロックが残っているときだけ前スライドを確定する(指示だけの塊はスライドにしない)。
+        if (buf.some((l) => l.text.trim() !== '')) out.push(buf);
+        buf = carry;
+      }
+    }
+    buf.push(ln);
   }
   out.push(buf);
   return out;
@@ -215,6 +336,14 @@ function parseSlide(raw: SourceLine[]): Slide {
   let background: string | null = null;
   let reveal: RevealMode = 'none';
   let slideId: string | undefined;
+  let transition: string | undefined;
+  let footer: string | undefined;
+  let header: string | undefined;
+  let paginate: boolean | undefined;
+  let toc: boolean | undefined;
+  let autoslide: number | undefined;
+  let hidden: boolean | undefined;
+  let anim: string | undefined;
   const classes: string[] = [];
   const kept: SourceLine[] = [];
   // 単独行マーカー(<!-- key --> など)は、次に来る本文ブロックに紐づける。
@@ -236,6 +365,14 @@ function parseSlide(raw: SourceLine[]): Slide {
         setReveal: (r) => (reveal = r),
         addClass: (c) => classes.push(c),
         setId: (v) => (slideId = v),
+        setTransition: (t) => (transition = t),
+        setFooter: (v) => (footer = v),
+        setHeader: (v) => (header = v),
+        setPaginate: (v) => (paginate = v),
+        setToc: () => (toc = true),
+        setAutoslide: (ms) => (autoslide = ms),
+        setHidden: () => (hidden = true),
+        setAnim: (v) => (anim = v),
       });
       continue;
     }
@@ -357,6 +494,14 @@ function parseSlide(raw: SourceLine[]): Slide {
     bodyLines,
     columnLines,
     id: slideId,
+    transition,
+    footer,
+    header,
+    paginate,
+    toc,
+    autoslide,
+    hidden,
+    anim,
   };
 }
 
@@ -513,6 +658,14 @@ interface DirectiveSink {
   setReveal: (r: RevealMode) => void;
   addClass: (c: string) => void;
   setId: (id: string) => void;
+  setTransition: (t: string) => void;
+  setFooter: (v: string) => void;
+  setHeader: (v: string) => void;
+  setPaginate: (v: boolean) => void;
+  setToc: () => void;
+  setAutoslide: (ms: number) => void;
+  setHidden: () => void;
+  setAnim: (v: string) => void;
 }
 
 function applyDirective(body: string, sink: DirectiveSink): void {
@@ -521,6 +674,17 @@ function applyDirective(body: string, sink: DirectiveSink): void {
     const key = kv[1]!.toLowerCase();
     const value = kv[2]!.trim();
     if (key === 'layout' && (LAYOUTS as string[]).includes(value)) sink.setLayout(value as Layout);
+    else if (key === 'transition' && (TRANSITIONS as readonly string[]).includes(value.toLowerCase())) {
+      sink.setTransition(value.toLowerCase());
+    } else if (key === 'anim' && (ANIM_EFFECTS as readonly string[]).includes(value.toLowerCase())) {
+      sink.setAnim(value.toLowerCase());
+    } else if (key === 'footer') sink.setFooter(value);
+    else if (key === 'header') sink.setHeader(value);
+    else if (key === 'paginate') sink.setPaginate(/^(true|on|yes|1)$/i.test(value));
+    else if (key === 'autoslide' || key === 'autoadvance') {
+      const ms = parseAutoslideMs(value);
+      if (ms !== undefined) sink.setAutoslide(ms);
+    }
     else if (key === 'class') value.split(/\s+/).forEach((c) => sink.addClass(c));
     // id は安全な文字・64字以内のみ受理(overlay 保存側の検証と対称に。長すぎ/不正は無視)。
     else if (key === 'id' && /^[\w-]{1,64}$/.test(value)) sink.setId(value);
@@ -533,5 +697,8 @@ function applyDirective(body: string, sink: DirectiveSink): void {
   }
   const word = body.toLowerCase();
   if (word === 'incremental' || word === 'fragment') sink.setReveal('sequential');
+  else if (word === 'paginate') sink.setPaginate(true);
+  else if (word === 'toc' || word === 'agenda') sink.setToc();
+  else if (word === 'hide' || word === 'hidden' || word === 'skip') sink.setHidden();
   else if ((LAYOUTS as string[]).includes(word)) sink.setLayout(word as Layout);
 }

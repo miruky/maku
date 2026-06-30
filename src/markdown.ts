@@ -3,6 +3,8 @@
 // HTMLは先にエスケープし、許可した記法だけを後から復元する。
 
 import type { SlideStep } from './deck';
+import { highlightCode } from './highlight';
+import { emojify } from './emoji';
 
 export function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -12,6 +14,82 @@ export function escapeHtml(s: string): string {
 // ここでは属性を抜け出せる引用符だけを潰せばよい。
 function escapeAttr(s: string): string {
   return s.replace(/"/g, '&quot;');
+}
+
+// 画像の alt 内に書いた表示ディレクティブ(w:/h:/フィルタ/rounded/shadow)を解釈する。
+// 例: ![図 w:200 h:120 blur:4px rounded](src)。値は厳格な正規表現で検証し CSS 注入を防ぐ。
+// 残りの語は alt として返す(キャプション/代替テキストを壊さない)。render 側からも使う。
+const IMG_SIZE_RE = /^\d+(?:\.\d+)?(?:px|%|em|rem|vw|vh)?$/;
+const IMG_FILTER_VAL_RE = /^-?\d+(?:\.\d+)?(?:px|%|deg|rem|em)?$/;
+const IMG_FILTERS = new Set([
+  'blur', 'brightness', 'contrast', 'grayscale', 'sepia', 'saturate', 'invert', 'opacity', 'hue-rotate',
+]);
+
+export function parseImgDirectives(alt: string): { alt: string; attrs: string } {
+  const rest: string[] = [];
+  let width = '';
+  let height = '';
+  const filters: string[] = [];
+  let rounded = false;
+  let shadow = false;
+  for (const tok of alt.split(/\s+/)) {
+    if (tok === 'rounded') { rounded = true; continue; }
+    if (tok === 'shadow') { shadow = true; continue; }
+    const m = /^([a-z-]+):(.+)$/i.exec(tok);
+    if (m) {
+      const k = m[1]!.toLowerCase();
+      const v = m[2]!;
+      if ((k === 'w' || k === 'width') && IMG_SIZE_RE.test(v)) { width = /[a-z%]/i.test(v) ? v : `${v}px`; continue; }
+      if ((k === 'h' || k === 'height') && IMG_SIZE_RE.test(v)) { height = /[a-z%]/i.test(v) ? v : `${v}px`; continue; }
+      if (IMG_FILTERS.has(k) && IMG_FILTER_VAL_RE.test(v)) { filters.push(`${k}(${v})`); continue; }
+    }
+    rest.push(tok);
+  }
+  const styles: string[] = [];
+  if (width) styles.push(`width:${width}`);
+  if (height) styles.push(`height:${height}`);
+  if (filters.length) styles.push(`filter:${filters.join(' ')}`);
+  if (rounded) styles.push('border-radius:0.5em');
+  if (shadow) styles.push('box-shadow:0 6px 22px rgba(0,0,0,0.28)');
+  const attrs = styles.length ? ` style="${styles.join(';')}"` : '';
+  return { alt: rest.join(' ').trim(), attrs };
+}
+
+// ── 数式(KaTeX)。コアは data-tex を持つプレースホルダを出すだけで、実際の描画は
+//    ブラウザ側(math.ts)が遅延ロードした KaTeX で行う。ここは純粋・テスト可能を保つ。──
+function unescapeEntities(s: string): string {
+  return s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+}
+
+// インライン数式。inline() は escapeHtml 済みのテキストを受け取るので、TeX 本体は実体参照を
+// 戻してから data-tex に入れる(KaTeX 用)。fallback 表示はエスケープ済みのまま残す。
+function mathInlineHtml(tex: string): string {
+  const raw = unescapeEntities(tex);
+  const safe = escapeHtml(raw);
+  return `<span class="math math-inline" data-tex="${safe.replace(/"/g, '&quot;')}">${safe}</span>`;
+}
+
+// ブロック数式。tex は生(エスケープ前)。
+function mathBlockHtml(tex: string): string {
+  const t = tex.trim();
+  const safe = escapeHtml(t);
+  return `<div class="math math-block" data-tex="${safe.replace(/"/g, '&quot;')}">${safe}</div>`;
+}
+
+// 複数行の $$ … $$ ブロックを読む(開き行で呼ぶ)。閉じ $$ までを TeX 本体にする。
+// 開き行に「$$」より後ろの文字があれば($$E=mc^2 のような書き方)最初の TeX 行として拾う。
+// これにより「$$」で始まるが同一行で閉じない行も必ず消費され、blocks() の無限ループを防ぐ。
+function mathBlockMulti(cur: Cursor): string {
+  const head = cur.lines[cur.i]!.replace(/^\s*\$\$/, '');
+  cur.i += 1; // 開き $$
+  const lines: string[] = [];
+  if (head.trim() !== '') lines.push(head);
+  while (cur.i < cur.lines.length && !/^\s*\$\$\s*$/.test(cur.lines[cur.i]!)) {
+    lines.push(cur.lines[cur.i]!);
+    cur.i += 1;
+  }
+  if (cur.i < cur.lines.length) cur.i += 1; // 閉じ $$
+  return mathBlockHtml(lines.join('\n'));
 }
 
 // インライン記法。入力はエスケープ済みであること。
@@ -26,10 +104,16 @@ export function inline(text: string): string {
   let s = text
     .replace(/\uE000/g, '') // \u5165\u529B\u306B\u7D1B\u308C\u305F\u756A\u5175\u306F\u9664\u53BB(\u8AA4\u5FA9\u5143\u30FBundefined\u6DF7\u5165\u3092\u9632\u3050)
     .replace(/`([^`]+)`/g, (_m, code: string) => hold(`<code>${code}</code>`))
+    // インライン数式 $…$。通貨($5 等)の誤検出を避けるため、開き $ の直後は非空白、閉じ $ の
+    // 直前は非空白、閉じ $ の直後は数字でないこと。$$ や \$ は対象外。退避して強調記法に巻き込まない。
+    .replace(/(?<![\\$])\$(?!\s)(?:[^\n$])+?(?<!\s)\$(?!\d)/g, (m: string) =>
+      hold(mathInlineHtml(m.slice(1, -1))),
+    )
     .replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_m, alt: string, src: string) => {
       const safe = /^(https?:|data:)/.test(src) ? src : '';
+      const d = parseImgDirectives(alt);
       return hold(
-        `<img src="${escapeAttr(safe)}" alt="${escapeAttr(alt)}" loading="lazy" decoding="async" />`,
+        `<img src="${escapeAttr(safe)}" alt="${escapeAttr(d.alt)}" loading="lazy" decoding="async"${d.attrs} />`,
       );
     })
     // \u30EA\u30F3\u30AF\u306F\u5C5E\u6027\u90E8\u3060\u3051\u9000\u907F\u3057\u3001\u30E9\u30D9\u30EB\u306F\u5F37\u8ABF\u51E6\u7406\u3092\u52B9\u304B\u305B\u308B([**\u592A\u5B57**](url) \u7B49)\u3002
@@ -40,11 +124,21 @@ export function inline(text: string): string {
     })
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
     .replace(/~~([^~]+)~~/g, '<del>$1</del>')
+    // ==ハイライト==(Marp/markdown-it-mark 互換)。前後の端は非空白に限り(== == 等の空マーク除外)、
+    // = と改行は含めない(列区切り === には当たらない)。~~打消し~~ より後に処理する。
+    .replace(/==(\S(?:[^=\n]*\S)?)==/g, '<mark>$1</mark>')
+    // 上付き ^x^ / 下付き ~x~(Pandoc 互換)。中身は英数と + - ( ) . のみ(化学式・指数: H~2~O,
+    // x^2^, Ca^2+^ 等)。CJK 文字・記号や [ ] を含めないことで、和文の波ダッシュ範囲(9~17時)や
+    // 脚注参照 [^1] を巻き込まない。連続デリミタ(~~ 等)も前後の否定先読み/後読みで除外する。
+    .replace(/(?<!\^)\^([0-9A-Za-z+\-().]+)\^(?!\^)/g, '<sup>$1</sup>')
+    .replace(/(?<!~)~([0-9A-Za-z+\-().]+)~(?!~)/g, '<sub>$1</sub>')
     .replace(/(^|[^*])\*([^*\s][^*]*)\*/g, '$1<em>$2</em>')
     // _ の強調は語中では無効(CommonMark)。開き _ の直前が語構成文字でなく、閉じ _ の直後も
     // 語構成文字でないときだけ強調にする。語の判定は Unicode 文字・数字(\p{L}\p{N})で行い、
     // ASCII の snake_case/URL だけでなく日本語(機能_詳細_)の語中アンダースコアも斜体化しない。
     .replace(/(^|[^\p{L}\p{N}_])_([^_\s][^_]*?)_(?![\p{L}\p{N}])/gu, '$1<em>$2</em>');
+  // :shortcode: \u7D75\u6587\u5B57\u3002\u9000\u907F\u30D7\u30EC\u30FC\u30B9\u30DB\u30EB\u30C0(\uE000\u2026)\u306B\u306F\u30B3\u30ED\u30F3\u304C\u7121\u3044\u306E\u3067\u5DFB\u304D\u8FBC\u307E\u306A\u3044\u3002
+  s = emojify(s);
   for (let k = 0; k < 5 && s.includes('\uE000'); k += 1) {
     s = s.replace(/\uE000(\d+)\uE000/g, (m, i: string) => stash[Number(i)] ?? m);
   }
@@ -104,10 +198,17 @@ function blocks(cur: Cursor, minIndent: number): string {
     const startLine = cur.i;
     let piece: string;
 
-    const fence = /^(\s*)(```|~~~)\s*([\w-]*)\s*$/.exec(line);
+    const fence = /^(\s*)(```|~~~)\s*([\w-]*)\s*(.*)$/.exec(line);
+    const mathSingle = /^\s*\$\$(.+?)\$\$\s*$/.exec(line);
     const heading = /^(#{1,6})\s+(.*)$/.exec(line);
     if (fence) {
-      piece = codeBlock(cur, fence[2]!, fence[3] ?? '');
+      piece = codeBlock(cur, fence[2]!, fence[3] ?? '', fence[4] ?? '');
+    } else if (mathSingle) {
+      piece = mathBlockHtml(mathSingle[1]!);
+      cur.i += 1;
+    } else if (/^\s*\$\$/.test(line)) {
+      // 「$$」で始まり同一行で閉じない行はすべて複数行ブロックの開きとみなす($$x など)。
+      piece = mathBlockMulti(cur);
     } else if (heading) {
       const level = heading[1]!.length;
       piece = `<h${level}>${inline(escapeHtml(heading[2]!.trim()))}</h${level}>`;
@@ -125,6 +226,9 @@ function blocks(cur: Cursor, minIndent: number): string {
       piece = paragraph(cur, minIndent);
     }
 
+    // どの分岐も必ずカーソルを進める前提だが、将来の追加で進まない分岐が出ても
+    // ここで1行進めて無限ループを防ぐ(consumeBlock と対称の安全弁)。
+    if (cur.i === startLine) cur.i += 1;
     // トップレベル(offsets あり)のときだけ、ブロックの元ソース範囲を埋め込む。
     // 入れ子(blockquote 内など)は offsets を持たないので付かない。
     if (cur.offsets) piece = withSource(piece, cur, startLine);
@@ -157,7 +261,68 @@ function withSource(html: string, cur: Cursor, startLine: number): string {
   return html.replace(/^(\s*<[a-zA-Z][\w-]*)/, `$1${attrs}`);
 }
 
-function codeBlock(cur: Cursor, mark: string, lang: string): string {
+// フェンス情報文字列(```ts title=app.ts {lineNumbers})から表示オプションを取り出す。
+// コードブロック右上のコピーボタン(クリップボード型アイコン)。contenteditable には含めない。
+const CODE_COPY_BTN =
+  '<button class="code-copy" type="button" contenteditable="false" aria-label="コードをコピー" title="コードをコピー">' +
+  '<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" focusable="false">' +
+  '<path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ' +
+  'd="M9 9h10v10H9z M5 15H4V5h10v1"/></svg></button>';
+
+// フェンス情報文字列の {1,3-5} を、ハイライトする行番号(1始まり)の集合にする。
+// 上限を抑えて巨大レンジ({1-9999999})でも Set が肥大しないようにし、0/負は無視する。
+function parseHlLines(meta: string): Set<number> {
+  const set = new Set<number>();
+  const m = /\{([\d\s,-]+)\}/.exec(meta);
+  if (!m) return set;
+  for (const part of m[1]!.split(',')) {
+    const range = part.trim();
+    const rm = /^(\d+)\s*-\s*(\d+)$/.exec(range);
+    if (rm) {
+      const lo = Math.max(1, Math.min(Number(rm[1]), Number(rm[2])));
+      const hi = Math.min(Math.max(Number(rm[1]), Number(rm[2])), lo + 10000);
+      for (let i = lo; i <= hi; i += 1) set.add(i);
+    } else if (/^\d+$/.test(range)) {
+      const v = Number(range);
+      if (v >= 1) set.add(v);
+    }
+  }
+  return set;
+}
+
+function parseCodeMeta(meta: string): {
+  title: string;
+  lineNumbers: boolean;
+  hlLines: Set<number>;
+} {
+  const lineNumbers = /(^|\W)line[-_]?numbers(\W|$)/i.test(meta);
+  let title = '';
+  let rest = meta;
+  const tm = /\btitle\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s}]+))/.exec(meta);
+  if (tm) {
+    title = tm[1] ?? tm[2] ?? tm[3] ?? '';
+    // タイトル値の中の {…}(例: title="a{1}b")を行指定と誤認しないよう、先に除去する。
+    rest = meta.slice(0, tm.index) + meta.slice(tm.index + tm[0].length);
+  }
+  return { title, lineNumbers, hlLines: parseHlLines(rest) };
+}
+
+// Mermaid 図ブロック。data-mermaid に原文を持たせ、mermaid.ts が SVG に描画する。
+// <code> ではないので preToMd は触れず、編集の往復は blockToMd が data-mermaid から復元する。
+// 描画前は生ソースを等幅で控えめに見せる(空白にしない / 失敗時もこれが残る)。
+function mermaidBlockHtml(src: string): string {
+  const safe = escapeHtml(src);
+  return `<div class="mermaid-block" data-mermaid="${safe.replace(/"/g, '&quot;')}"><pre class="mermaid-src">${safe}</pre></div>`;
+}
+
+// QR コードブロック。data-qr に原文(URL/テキスト)を持たせ、qr.ts が SVG に描画する。
+// mermaid と同様 <code> ではないので preToMd は触れず、編集の往復は blockToMd が data-qr から復元する。
+function qrBlockHtml(src: string): string {
+  const safe = escapeHtml(src.trim());
+  return `<div class="qr-block" data-qr="${safe.replace(/"/g, '&quot;')}"><pre class="qr-src">${safe}</pre></div>`;
+}
+
+function codeBlock(cur: Cursor, mark: string, lang: string, meta = ''): string {
   cur.i += 1;
   const body: string[] = [];
   while (cur.i < cur.lines.length && !cur.lines[cur.i]!.trimStart().startsWith(mark)) {
@@ -165,9 +330,44 @@ function codeBlock(cur: Cursor, mark: string, lang: string): string {
     cur.i += 1;
   }
   if (cur.i < cur.lines.length) cur.i += 1; // 閉じフェンス
-  const cls = lang ? ` class="language-${lang}"` : '';
-  const label = lang ? `<span class="code-lang">${escapeHtml(lang)}</span>` : '';
-  return `<pre data-lang="${escapeHtml(lang)}">${label}<code${cls}>${escapeHtml(body.join('\n'))}</code></pre>`;
+  // ```mermaid は図として扱う(ハイライトせず、mermaid.ts が SVG 描画)。
+  if (lang.toLowerCase() === 'mermaid') return mermaidBlockHtml(body.join('\n'));
+  // ```qr は QR コードとして扱う(qr.ts が SVG 描画)。
+  if (lang.toLowerCase() === 'qr') return qrBlockHtml(body.join('\n'));
+  const opts = parseCodeMeta(meta);
+  // ハイライトは純粋な string→string。トークンは span、その他はエスケープ済みなので
+  // 直接編集(preToMd)は span を透過して元コードを復元でき、書き出しにもそのまま乗る。
+  let inner = highlightCode(body.join('\n'), lang);
+  // {1,3-5} 指定時は各行を <div class="cl"> で囲み、対象行に cl-hl を付ける。改行は div 境界に
+  // 移るが、preToMd(inlineToMd の DIV 規則)が改行を復元するので往復はロスレス。複数行トークンは
+  // highlight 側で行ごとの span に割ってあるので、ここでの \n 分割でトークンが壊れない。
+  if (opts.hlLines.size) {
+    const lines = inner.split('\n');
+    // 実在する行が一つも対象でない({0} や範囲外の {99})ときは行ラップしない(無駄な div を作らない)。
+    if (lines.some((_, i) => opts.hlLines.has(i + 1))) {
+      inner = lines
+        .map((line, i) => `<div class="cl${opts.hlLines.has(i + 1) ? ' cl-hl' : ''}">${line}</div>`)
+        .join('');
+    }
+  }
+  const langClass = lang ? ` class="language-${lang}"` : '';
+  const classes = ['code-block'];
+  if (opts.lineNumbers) classes.push('has-ln');
+  if (opts.title) classes.push('has-title');
+  const title = opts.title ? `<div class="code-title">${escapeHtml(opts.title)}</div>` : '';
+  // 言語チップは既定表示のみ(タイトル/行番号モードでは出さず、従来の見た目を保つ)。
+  const chip = lang && !opts.title ? `<span class="code-lang">${escapeHtml(lang)}</span>` : '';
+  // 行番号はコードの実改行を保つため、独立した数値ガターとして出す(code には触れない)。
+  const gutter = opts.lineNumbers
+    ? `<span class="code-gutter" aria-hidden="true">${Array.from({ length: body.length || 1 }, (_, i) => i + 1).join('\n')}</span>`
+    : '';
+  // フェンス情報文字列(title=/lineNumbers 等)を data-meta に保存し、直接編集(preToMd)で原文へ
+  // 復元できるようにする(でないと編集の往復で title/行番号がソースから消える)。
+  const m = meta.trim();
+  const metaAttr = m ? ` data-meta="${escapeHtml(m).replace(/"/g, '&quot;')}"` : '';
+  // コピー用ボタン。<code> の外側なので preToMd(直接編集の往復)と書き出しテキストに影響しない。
+  // 実処理は main.ts のクリック委譲。発表中などは CSS で隠す/出すを切り替える。
+  return `<pre data-lang="${escapeHtml(lang)}"${metaAttr} class="${classes.join(' ')}">${title}${chip}${gutter}${CODE_COPY_BTN}<code${langClass}>${inner}</code></pre>`;
 }
 
 function blockquote(cur: Cursor): string {
@@ -261,6 +461,7 @@ function paragraph(cur: Cursor, minIndent: number): string {
       /^\s*>\s?/.test(line) ||
       LIST_RE.test(line) ||
       /^(\s*)(```|~~~)/.test(line) ||
+      /^\s*\$\$/.test(line) ||
       /^\s*([-*_])(\s*\1){2,}\s*$/.test(line)
     ) {
       break;
@@ -292,9 +493,12 @@ export function topLevelBlockStarts(lines: string[]): number[] {
 function consumeBlock(cur: Cursor): void {
   const before = cur.i;
   const line = cur.lines[cur.i]!;
-  const fence = /^(\s*)(```|~~~)\s*([\w-]*)\s*$/.exec(line);
+  const fence = /^(\s*)(```|~~~)\s*([\w-]*)\s*(.*)$/.exec(line);
+  const mathSingle = /^\s*\$\$(.+?)\$\$\s*$/.test(line);
   const heading = /^(#{1,6})\s+(.*)$/.exec(line);
-  if (fence) codeBlock(cur, fence[2]!, fence[3] ?? '');
+  if (fence) codeBlock(cur, fence[2]!, fence[3] ?? '', fence[4] ?? '');
+  else if (mathSingle) cur.i += 1;
+  else if (/^\s*\$\$/.test(line)) mathBlockMulti(cur);
   else if (heading) cur.i += 1;
   else if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) cur.i += 1;
   else if (/^\s*>\s?/.test(line)) blockquote(cur);

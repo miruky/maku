@@ -12,6 +12,8 @@ export function inlineToMd(node: Node): string {
   const el = node as Element;
   // 段階表示の番号バッジなど、本文ではないオーバーレイ用要素は無視する(誤って直列化しない)。
   if (el.classList.contains('step-badge')) return '';
+  // 数式は KaTeX 描画後に中身が別物になるため、元の TeX(data-tex)から $…$ を復元する。
+  if (el.classList.contains('math-inline')) return '$' + (el.getAttribute('data-tex') ?? '') + '$';
   const kids = (): string => Array.from(el.childNodes).map(inlineToMd).join('');
   switch (el.tagName) {
     case 'BR':
@@ -26,6 +28,18 @@ export function inlineToMd(node: Node): string {
     case 'S':
     case 'STRIKE':
       return `~~${kids()}~~`;
+    case 'MARK':
+      return `==${kids()}==`;
+    // 上付き/下付きは英数記号のみ往復可能。空白等で記法に戻せない中身(編集で混入)は
+    // 壊れた ~ / ^ を残さず素のテキストにフォールバックする(再パースで打消し等に化けない)。
+    case 'SUP': {
+      const k = kids();
+      return /^[0-9A-Za-z+\-().]+$/.test(k) ? `^${k}^` : k;
+    }
+    case 'SUB': {
+      const k = kids();
+      return /^[0-9A-Za-z+\-().]+$/.test(k) ? `~${k}~` : k;
+    }
     case 'CODE':
       return '`' + (el.textContent ?? '') + '`';
     case 'A':
@@ -48,6 +62,14 @@ function inlineChildren(el: Element): string {
 // 描画済みのブロック要素1つを、対応するMarkdownへ戻す。
 export function blockToMd(el: Element): string {
   const tag = el.tagName;
+  // ブロック数式は data-tex から $$…$$ を復元(KaTeX 描画後の中身を直列化しない)。
+  if (el.classList.contains('math-block')) return '$$\n' + (el.getAttribute('data-tex') ?? '') + '\n$$';
+  // Mermaid 図は data-mermaid から ```mermaid フェンスを復元(SVG描画後の中身を直列化しない)。
+  if (el.classList.contains('mermaid-block'))
+    return '```mermaid\n' + (el.getAttribute('data-mermaid') ?? '') + '\n```';
+  // QR は data-qr から ```qr フェンスを復元(SVG描画後の中身を直列化しない)。
+  if (el.classList.contains('qr-block'))
+    return '```qr\n' + (el.getAttribute('data-qr') ?? '') + '\n```';
   if (/^H[1-6]$/.test(tag)) {
     const level = Number(tag[1]);
     return '#'.repeat(level) + ' ' + inlineChildren(el).trim();
@@ -132,9 +154,11 @@ function tableToMd(table: Element): string {
 
 function preToMd(pre: Element): string {
   const lang = pre.getAttribute('data-lang') ?? '';
+  // フェンス情報文字列(title=app.ts {lineNumbers} 等)を原文へ戻す(編集の往復で失わないため)。
+  const meta = pre.getAttribute('data-meta') ?? '';
   const code = pre.querySelector('code');
   // textContent だと contenteditable が改行に入れる <div>/<br> が潰れて行が連結してしまう。
   // inlineToMd は BR/DIV/P を改行へ写すので、それで本来の改行を保つ。
   const text = code ? Array.from(code.childNodes).map(inlineToMd).join('') : '';
-  return '```' + lang + '\n' + text.replace(/\n$/, '') + '\n```';
+  return '```' + lang + (meta ? ' ' + meta : '') + '\n' + text.replace(/\n$/, '') + '\n```';
 }
