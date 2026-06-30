@@ -581,6 +581,21 @@ body {
   color: var(--fg);
 }
 
+/* ==ハイライト==。文字色は --fg のまま、背景はアクセントの半透明にして
+   明テーマ/暗テーマどちらでも本文の可読性(AA)を保つ。 */
+.slide mark {
+  background: color-mix(in srgb, var(--accent, #f1c40f) 30%, transparent);
+  color: inherit;
+  padding: 0 0.14em;
+  border-radius: 0.2em;
+}
+
+/* 上付き・下付きで行の高さが暴れないように。 */
+.slide sub,
+.slide sup {
+  line-height: 0;
+}
+
 .slide code {
   font-family: var(--mono);
   font-size: 0.86em;

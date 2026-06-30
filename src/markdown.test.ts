@@ -14,6 +14,21 @@ describe('renderMarkdown', () => {
     expect(renderMarkdown('`x = 1`')).toContain('<code>x = 1</code>');
   });
 
+  it('ハイライト ==x== / 上付き ^x^ / 下付き ~x~', () => {
+    expect(renderMarkdown('==重要==')).toContain('<mark>重要</mark>');
+    expect(renderMarkdown('x^2^')).toContain('x<sup>2</sup>');
+    expect(renderMarkdown('H~2~O')).toContain('H<sub>2</sub>O');
+    // 打ち消し ~~…~~ は下付きに食われない(先に処理)。
+    const del = renderMarkdown('~~消した~~');
+    expect(del).toContain('<del>消した</del>');
+    expect(del).not.toContain('<sub>');
+    // 上付き・下付きは空白を含む場合は対象外(誤検出回避)。
+    expect(renderMarkdown('a ~ b ~ c')).not.toContain('<sub>');
+    expect(renderMarkdown('2 ^ 3 ^ 4')).not.toContain('<sup>');
+    // 列区切りの === は本文インラインに来てもハイライトにならない。
+    expect(renderMarkdown('2019 === 開始')).not.toContain('<mark>');
+  });
+
   it('_ の強調は語境界のみ。語中アンダースコア(snake_case / URL)は斜体化しない', () => {
     expect(renderMarkdown('_斜体_')).toContain('<em>斜体</em>'); // 語境界では有効
     expect(renderMarkdown('語の _強調_ です')).toContain('<em>強調</em>');

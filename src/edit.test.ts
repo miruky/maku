@@ -21,6 +21,12 @@ describe('blockToMd(view → md)', () => {
     expect(blockToMd(first('~~消~~ も残す'))).toBe('~~消~~ も残す');
   });
 
+  it('ハイライト/上付き/下付きを往復で保つ', () => {
+    expect(blockToMd(first('==重要== な点'))).toBe('==重要== な点');
+    expect(blockToMd(first('面積は x^2^ です'))).toBe('面積は x^2^ です');
+    expect(blockToMd(first('水は H~2~O'))).toBe('水は H~2~O');
+  });
+
   it('リンク', () => {
     expect(blockToMd(first('[名](https://e.com)'))).toBe('[名](https://e.com)');
   });

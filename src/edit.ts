@@ -28,6 +28,12 @@ export function inlineToMd(node: Node): string {
     case 'S':
     case 'STRIKE':
       return `~~${kids()}~~`;
+    case 'MARK':
+      return `==${kids()}==`;
+    case 'SUP':
+      return `^${kids()}^`;
+    case 'SUB':
+      return `~${kids()}~`;
     case 'CODE':
       return '`' + (el.textContent ?? '') + '`';
     case 'A':
