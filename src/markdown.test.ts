@@ -95,6 +95,28 @@ describe('renderMarkdown', () => {
     expect(renderMarkdown('```ts\na\nb\n```')).not.toContain('class="cl"');
   });
 
+  it('行ハイライト+CSS複数行コメントでも span が割れず継続行も色が付く(回帰)', () => {
+    const html = renderMarkdown('```css {1}\n/* a\nb */\n```');
+    const lines = html.match(/<div class="cl[^"]*">.*?<\/div>/gs) ?? [];
+    expect(lines).toHaveLength(2);
+    expect(lines[1]).toContain('hl-comment'); // 継続行も color が続く
+    for (const ln of lines) {
+      // 各行内で span の開閉が一致(分割で span が割れていない)。
+      expect((ln.match(/<span/g) ?? []).length).toBe((ln.match(/<\/span>/g) ?? []).length);
+    }
+  });
+
+  it('title 値の中の {..} は行指定として誤認しない(回帰)', () => {
+    const html = renderMarkdown('```js title="conf{1}.js"\nconst a = 1;\nconst b = 2;\n```');
+    expect(html).not.toContain('class="cl"'); // 行ラップされない
+    expect(html).toContain('conf{1}.js'); // タイトルは保持
+  });
+
+  it('範囲外 / 0 の行指定では行ラップしない(回帰)', () => {
+    expect(renderMarkdown('```js {0}\na\nb\n```')).not.toContain('class="cl"');
+    expect(renderMarkdown('```js {99}\na\nb\n```')).not.toContain('class="cl"');
+  });
+
   it('表(配置つき)', () => {
     const html = renderMarkdown('| 名 | 値 |\n|:--|--:|\n| a | 1 |');
     expect(html).toContain('<table>');

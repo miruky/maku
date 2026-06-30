@@ -270,6 +270,7 @@ const CODE_COPY_BTN =
   'd="M9 9h10v10H9z M5 15H4V5h10v1"/></svg></button>';
 
 // フェンス情報文字列の {1,3-5} を、ハイライトする行番号(1始まり)の集合にする。
+// 上限を抑えて巨大レンジ({1-9999999})でも Set が肥大しないようにし、0/負は無視する。
 function parseHlLines(meta: string): Set<number> {
   const set = new Set<number>();
   const m = /\{([\d\s,-]+)\}/.exec(meta);
@@ -278,11 +279,12 @@ function parseHlLines(meta: string): Set<number> {
     const range = part.trim();
     const rm = /^(\d+)\s*-\s*(\d+)$/.exec(range);
     if (rm) {
-      const a = Number(rm[1]);
-      const b = Number(rm[2]);
-      for (let i = Math.min(a, b); i <= Math.max(a, b); i += 1) set.add(i);
+      const lo = Math.max(1, Math.min(Number(rm[1]), Number(rm[2])));
+      const hi = Math.min(Math.max(Number(rm[1]), Number(rm[2])), lo + 10000);
+      for (let i = lo; i <= hi; i += 1) set.add(i);
     } else if (/^\d+$/.test(range)) {
-      set.add(Number(range));
+      const v = Number(range);
+      if (v >= 1) set.add(v);
     }
   }
   return set;
@@ -295,9 +297,14 @@ function parseCodeMeta(meta: string): {
 } {
   const lineNumbers = /(^|\W)line[-_]?numbers(\W|$)/i.test(meta);
   let title = '';
+  let rest = meta;
   const tm = /\btitle\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s}]+))/.exec(meta);
-  if (tm) title = tm[1] ?? tm[2] ?? tm[3] ?? '';
-  return { title, lineNumbers, hlLines: parseHlLines(meta) };
+  if (tm) {
+    title = tm[1] ?? tm[2] ?? tm[3] ?? '';
+    // タイトル値の中の {…}(例: title="a{1}b")を行指定と誤認しないよう、先に除去する。
+    rest = meta.slice(0, tm.index) + meta.slice(tm.index + tm[0].length);
+  }
+  return { title, lineNumbers, hlLines: parseHlLines(rest) };
 }
 
 // Mermaid 図ブロック。data-mermaid に原文を持たせ、mermaid.ts が SVG に描画する。
@@ -335,10 +342,13 @@ function codeBlock(cur: Cursor, mark: string, lang: string, meta = ''): string {
   // 移るが、preToMd(inlineToMd の DIV 規則)が改行を復元するので往復はロスレス。複数行トークンは
   // highlight 側で行ごとの span に割ってあるので、ここでの \n 分割でトークンが壊れない。
   if (opts.hlLines.size) {
-    inner = inner
-      .split('\n')
-      .map((line, i) => `<div class="cl${opts.hlLines.has(i + 1) ? ' cl-hl' : ''}">${line}</div>`)
-      .join('');
+    const lines = inner.split('\n');
+    // 実在する行が一つも対象でない({0} や範囲外の {99})ときは行ラップしない(無駄な div を作らない)。
+    if (lines.some((_, i) => opts.hlLines.has(i + 1))) {
+      inner = lines
+        .map((line, i) => `<div class="cl${opts.hlLines.has(i + 1) ? ' cl-hl' : ''}">${line}</div>`)
+        .join('');
+    }
   }
   const langClass = lang ? ` class="language-${lang}"` : '';
   const classes = ['code-block'];

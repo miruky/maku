@@ -236,7 +236,7 @@ function tokenizeJson(code: string): string {
     let m: RegExpExecArray | null;
     if ((m = /^"(?:\\.|[^"\\])*"/.exec(rest))) {
       const isKey = /^\s*:/.test(rest.slice(m[0].length));
-      out += span(isKey ? 'property' : 'string', m[0]);
+      out += spanMulti(isKey ? 'property' : 'string', m[0]); // 文字列は改行を含み得る
       i += m[0].length;
       continue;
     }
@@ -256,7 +256,7 @@ function tokenizeHtml(code: string): string {
   while (i < n) {
     const rest = code.slice(i);
     let m: RegExpExecArray | null;
-    if ((m = /^<!--[\s\S]*?-->/.exec(rest))) { out += span('comment', m[0]); i += m[0].length; continue; }
+    if ((m = /^<!--[\s\S]*?-->/.exec(rest))) { out += spanMulti('comment', m[0]); i += m[0].length; continue; }
     // タグ: <tag ...> または </tag>。内部の属性も処理する。
     if ((m = /^<\/?[a-zA-Z][\w:-]*/.exec(rest))) {
       const slash = m[0].startsWith('</') ? '&lt;/' : '&lt;';
@@ -268,7 +268,7 @@ function tokenizeHtml(code: string): string {
         const r2 = code.slice(i);
         let a: RegExpExecArray | null;
         if ((a = /^[a-zA-Z_:][\w:.-]*/.exec(r2))) { out += span('attr', a[0]); i += a[0].length; continue; }
-        if ((a = /^"(?:[^"]*)"|^'(?:[^']*)'/.exec(r2))) { out += span('string', a[0]); i += a[0].length; continue; }
+        if ((a = /^"(?:[^"]*)"|^'(?:[^']*)'/.exec(r2))) { out += spanMulti('string', a[0]); i += a[0].length; continue; }
         if (code[i] === '/') { out += '<span class="hl-punctuation">/</span>'; i += 1; continue; }
         out += esc(code[i]!);
         i += 1;
@@ -291,9 +291,9 @@ function tokenizeCss(code: string): string {
   while (i < n) {
     const rest = code.slice(i);
     let m: RegExpExecArray | null;
-    if ((m = /^\/\*[\s\S]*?\*\//.exec(rest))) { out += span('comment', m[0]); i += m[0].length; continue; }
+    if ((m = /^\/\*[\s\S]*?\*\//.exec(rest))) { out += spanMulti('comment', m[0]); i += m[0].length; continue; }
     if ((m = /^\/\/[^\n]*/.exec(rest))) { out += span('comment', m[0]); i += m[0].length; continue; }
-    if ((m = /^"(?:\\.|[^"\\])*"|^'(?:\\.|[^'\\])*'/.exec(rest))) { out += span('string', m[0]); i += m[0].length; continue; }
+    if ((m = /^"(?:\\.|[^"\\])*"|^'(?:\\.|[^'\\])*'/.exec(rest))) { out += spanMulti('string', m[0]); i += m[0].length; continue; }
     if (code[i] === '{') { inBlock = true; out += '<span class="hl-punctuation">{</span>'; i += 1; continue; }
     if (code[i] === '}') { inBlock = false; out += '<span class="hl-punctuation">}</span>'; i += 1; continue; }
     if ((m = /^#[0-9a-fA-F]{3,8}\b/.exec(rest))) { out += span('number', m[0]); i += m[0].length; continue; }
