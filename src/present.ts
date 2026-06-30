@@ -30,10 +30,16 @@ export class Presenter {
     private readonly els: PresenterEls,
     private readonly onChange?: (index: number) => void,
     private readonly onAfterRender?: () => void,
+    // スライド・ステップが変わるたびに呼ぶ(発表者コンソールへの状態同期に使う)。
+    private readonly onStep?: () => void,
   ) {}
 
   get index(): number {
     return this.idx;
+  }
+  // 現在のステップ(1始まり)。発表者コンソールへの同期で参照する。
+  get currentStep(): number {
+    return this.step;
   }
   get total(): number {
     return this.deck.slides.length;
@@ -152,6 +158,7 @@ export class Presenter {
     }
     this.updateAux();
     this.scheduleAuto();
+    this.onStep?.();
   }
 
   // ── 自動送り(キオスク) ──

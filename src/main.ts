@@ -30,6 +30,7 @@ import { deckTitles, slideHtml } from './render';
 import { Annotator } from './annot';
 import { hasPendingMath, typesetMath } from './math';
 import { hasPendingMermaid, resetMermaid, typesetMermaid } from './mermaid';
+import { openSync, type SyncMsg } from './sync';
 import { Presenter } from './present';
 import {
   applyTheme,
@@ -194,6 +195,8 @@ const ICON = {
   share: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="12" r="2.4"/><circle cx="18" cy="6" r="2.4"/><circle cx="18" cy="18" r="2.4"/><path d="M8.1 11l7.8-4M8.1 13l7.8 4"/></svg>',
   theme: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18 3 3 0 0 0 0-6 1.5 1.5 0 0 1 0-3 3 3 0 0 0 0-6z" fill="currentColor" stroke="none"/></svg>',
   help: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 0 1 4.5 1.5c0 1.7-2 2-2 3.5"/><circle cx="12" cy="17.5" r="0.6" fill="currentColor"/></svg>',
+  console:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>',
 };
 
 app.innerHTML = `
@@ -216,6 +219,7 @@ app.innerHTML = `
       <button class="ico" id="theme-btn" data-tip="テーマを選ぶ (T)" aria-label="テーマを選ぶ">${ICON.theme}</button>
       <button class="ico" id="export" data-tip="書き出し: PDF / PPTX / Google (P)" aria-label="書き出し">${ICON.pdf}</button>
       <button class="ico" id="share" data-tip="共有リンクをコピー" aria-label="共有リンクをコピー">${ICON.share}</button>
+      <button class="ico" id="presenter-view" data-tip="発表者ビュー(別ウィンドウ・V)" aria-label="発表者ビューを開く">${ICON.console}</button>
       <button class="ico" id="present" data-tip="全画面で発表 (F)" aria-label="全画面で発表">${ICON.play}</button>
       <button class="ico" id="help-btn" data-tip="ヘルプ (?)" aria-label="ヘルプ">${ICON.help}</button>
     </div>
@@ -407,6 +411,7 @@ theme: ai-hiru-mincho
             <dt>F</dt><dd>全画面で発表</dd>
             <dt>O</dt><dd>スライド一覧</dd>
             <dt>S</dt><dd>発表者ノート(次スライドのプレビュー・ステップ進捗・タイマーつき)</dd>
+            <dt>V</dt><dd>発表者ビュー(別ウィンドウ。2画面で現スライド・次・ノート・タイマーを手元に)</dd>
             <dt>E</dt><dd>Markdown エディタ</dd>
             <dt>T</dt><dd>テーマ選択</dd>
             <dt>P</dt><dd>書き出し</dd>
@@ -560,6 +565,9 @@ barActions.addEventListener('click', (e) => {
 window.addEventListener('scroll', hideTip, true);
 window.addEventListener('resize', hideTip);
 
+// 発表者コンソール(別ウィンドウ)との同期チャンネル。未対応環境では null。
+const sync = openSync();
+
 const presenter = new Presenter(
   { stage, progress: $('progress'), counter: $('counter'), notes: $('notes-body'), next: $('notes-next'), step: $('notes-step') },
   (i) => {
@@ -569,7 +577,50 @@ const presenter = new Presenter(
     annot.clearInk(); // スライドを移ったら前ページの手書きは消す(モードは維持)
   },
   () => decorateStage(),
+  () => broadcastState(), // スライド/ステップが変わるたびに発表者コンソールへ位置を送る
 );
+
+// 現在位置を発表者コンソールへ送る。スライドにもステップにも反応する(applySteps 経由)。
+function broadcastState(): void {
+  sync?.postMessage({
+    t: 'state',
+    index: presenter.index,
+    step: presenter.currentStep,
+    total: presenter.total,
+  } satisfies SyncMsg);
+}
+
+// 発表者コンソールを別ウィンドウで開く。コンソールは localStorage の md/テーマを読み、
+// 位置はチャンネルで受け取る。ポップアップがブロックされたら案内する。
+function openPresenterView(): void {
+  const w = window.open('presenter.html', 'maku-presenter', 'width=1180,height=760');
+  if (!w) {
+    toast('ポップアップを許可すると発表者ビューを開けます');
+    return;
+  }
+  // hello を取りこぼした場合の保険として、少し後に現在位置を送り直す。
+  window.setTimeout(broadcastState, 600);
+}
+
+if (sync) {
+  sync.onmessage = (e: MessageEvent<SyncMsg>): void => {
+    const m = e.data;
+    if (m.t === 'cmd') {
+      // コンソールからの操作。本体が唯一の状態保持者なので、ここで実行して state を返す。
+      nav(() => {
+        if (m.cmd === 'next') presenter.next();
+        else if (m.cmd === 'prev') presenter.prev();
+        else if (m.cmd === 'first') presenter.go(0);
+        else if (m.cmd === 'last') presenter.go(presenter.total - 1);
+        else if (m.cmd === 'goto' && typeof m.index === 'number') presenter.go(m.index);
+      });
+    } else if (m.t === 'hello') {
+      // 新しく開いたコンソールへ、デッキ読み直しの合図と現在位置を送る。
+      sync?.postMessage({ t: 'deck' } satisfies SyncMsg);
+      broadcastState();
+    }
+  };
+}
 
 let currentTheme = themeById(readTheme());
 
@@ -603,6 +654,7 @@ function setTheme(id: string, persist = true): void {
       // 保存できなくても表示は反映する
     }
     history.replaceState(null, '', urlFor(presenter.index + 1));
+    sync?.postMessage({ t: 'deck' } satisfies SyncMsg); // コンソールへテーマ変更を知らせる
   }
 }
 
@@ -640,6 +692,7 @@ function rebuild(keepIndex = true): void {
   } catch {
     // 保存失敗は無視
   }
+  sync?.postMessage({ t: 'deck' } satisfies SyncMsg); // 発表者コンソールに本文更新を知らせる
 }
 
 // ── スライド直接編集(PowerPoint風の自由配置 + view ⇄ md の双方向) ──
@@ -2155,6 +2208,7 @@ $('edit').addEventListener('click', () => toggle('editor'));
 // 狭い画面では編集がスライド全面を覆うので、その場合だけ閉じたままにする。
 if (window.matchMedia('(min-width: 821px)').matches) toggle('editor', true);
 $('notes-btn').addEventListener('click', () => toggle('notes-panel'));
+$('presenter-view').addEventListener('click', openPresenterView);
 $('overview').addEventListener('click', () => {
   buildOverview();
   toggle('overview-overlay', true);
@@ -2723,6 +2777,10 @@ window.addEventListener('keydown', (ev) => {
       toast(on ? '自動送りを再開しました' : '自動送りを一時停止しました');
       return;
     }
+    case 'v':
+    case 'V':
+      openPresenterView(); // 発表者ビュー(別ウィンドウ)を開く
+      return;
   }
 
   // 以下のオーサリング系(編集パネル・テーマ・書き出し)は発表中は止める(発表の邪魔をしない)。

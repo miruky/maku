@@ -2871,3 +2871,132 @@ body.faux-full .deck-root {
     opacity: 0.5;
   }
 }
+
+/* ── 発表者コンソール(別ウィンドウ presenter.html)── */
+/* 周辺のクロムは暗色固定。スライド自体は deck-root が選択テーマの配色を保つ。 */
+.pv-app {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: #14161a;
+  color: #e7e9ee;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+.pv-main {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  gap: 14px;
+  padding: 14px;
+}
+.pv-now {
+  flex: 1 1 62%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: hidden;
+}
+.pv-side {
+  flex: 1 1 38%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: hidden;
+}
+.pv-label {
+  flex: 0 0 auto;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: #9aa3b2;
+}
+.pv-deck {
+  width: 100%;
+  max-width: 100%;
+  aspect-ratio: var(--deck-ar, 16 / 9);
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+  flex: 0 0 auto;
+}
+.pv-clockrow {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex: 0 0 auto;
+}
+.pv-timer {
+  font-size: 30px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.pv-clock {
+  font-size: 16px;
+  color: #9aa3b2;
+  font-variant-numeric: tabular-nums;
+}
+.pv-btn {
+  background: #2a2e37;
+  color: #e7e9ee;
+  border: 1px solid #3a3f4b;
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-size: 14px;
+  cursor: pointer;
+}
+.pv-btn:hover {
+  background: #353a45;
+}
+.pv-mini {
+  margin-left: auto;
+  background: #2a2e37;
+  color: #e7e9ee;
+  border: 1px solid #3a3f4b;
+  border-radius: 8px;
+  padding: 5px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.pv-mini:hover {
+  background: #353a45;
+}
+.pv-notes {
+  flex: 1 1 auto;
+  min-height: 60px;
+  background: #1b1e24;
+  border: 1px solid #2a2e37;
+  border-radius: 10px;
+  padding: 12px 14px;
+  overflow: auto;
+  font-size: 15px;
+  line-height: 1.7;
+}
+.pv-notes > :first-child {
+  margin-top: 0;
+}
+.pv-notes .notes-empty {
+  color: #6b7280;
+}
+.pv-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 16px;
+  background: #0f1013;
+  border-top: 1px solid #2a2e37;
+}
+.pv-pos {
+  font-size: 18px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.pv-step {
+  color: #9aa3b2;
+  font-size: 14px;
+}
+.pv-bar #pv-next-btn {
+  margin-left: auto;
+}
