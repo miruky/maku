@@ -13,29 +13,70 @@ import {
 describe('slideRanges(並べ替え用・隠しスライド保全)', () => {
   const md = '# A\n\n---\n\n<!-- hide -->\n# 隠し\n\n---\n\n# B';
   it('隠し・空も含む全スライドを範囲付きで返す', () => {
-    const r = slideRanges(md);
-    expect(r).toHaveLength(3);
-    expect(r.map((x) => x.visible)).toEqual([true, false, true]);
+    const { slides } = slideRanges(md);
+    expect(slides).toHaveLength(3);
+    expect(slides.map((x) => x.visible)).toEqual([true, false, true]);
   });
   it('visible のみ並べると deck.slides と同順・同内容', () => {
-    const r = slideRanges(md);
-    const visText = r.filter((x) => x.visible).map((x) => md.slice(x.srcStart, x.srcEnd).trim());
+    const { slides } = slideRanges(md);
+    const visText = slides
+      .filter((x) => x.visible)
+      .map((x) => md.slice(x.srcStart, x.srcEnd).trim());
     const deckText = parseDeck(md).slides.map((s) => s.content.split('\n')[0]);
     expect(visText[0]).toContain('# A');
     expect(visText[1]).toContain('# B');
     expect(deckText).toEqual(['# A', '# B']); // 隠しは除外
   });
   it('全 segment を join し直すと、隠しスライドが原文に残る(往復で消えない)', () => {
-    const r = slideRanges(md);
-    const prefix = md.slice(0, r[0]!.srcStart);
-    const segs = r.map((x) => md.slice(x.srcStart, x.srcEnd));
+    const { bodyStart, slides } = slideRanges(md);
+    const prefix = md.slice(0, bodyStart);
+    const segs = slides.map((x) => md.slice(x.srcStart, x.srcEnd));
     // B を先頭へ移す並べ替え相当(full index 2 を 0 の前へ)
     const moved = segs.splice(2, 1)[0]!;
     segs.splice(0, 0, moved);
     const newMd = prefix + segs.join('\n\n---\n\n') + '\n';
     expect(newMd).toContain('<!-- hide -->'); // 隠し指示が残る
     expect(parseDeck(newMd).slides.map((s) => s.content.split('\n')[0])).toEqual(['# B', '# A']);
-    expect(slideRanges(newMd).filter((x) => !x.visible)).toHaveLength(1); // 隠しスライドが1枚残存
+    expect(slideRanges(newMd).slides.filter((x) => !x.visible)).toHaveLength(1); // 隠しスライドが残存
+  });
+  it('回帰: フロントマター直後に --- がある(先頭空スライド)デッキでも prefix でメタを失わない', () => {
+    const fm = '---\ntheme: rose\npaginate: true\n---\n---\n# A\n\n---\n\n# B';
+    const { bodyStart, slides } = slideRanges(fm);
+    const prefix = fm.slice(0, bodyStart);
+    expect(prefix).toContain('theme: rose'); // フロントマターが prefix に入る
+    const segs = slides.map((x) => fm.slice(x.srcStart, x.srcEnd));
+    // A(visible 先頭=full index1)を末尾へ
+    const moved = segs.splice(1, 1)[0]!;
+    segs.push(moved);
+    const out = prefix + segs.join('\n\n---\n\n') + '\n';
+    expect(parseDeck(out).meta.theme).toBe('rose'); // メタが保持される
+    expect(parseDeck(out).meta.paginate).toBe('true');
+  });
+  it('回帰: コードフェンス内の --- を含むスライドを並べ替えても割れない', () => {
+    const fenced = '# A\n\n```\nx\n---\ny\n```\n\n---\n\n# B';
+    const before = parseDeck(fenced).slides.length;
+    const { bodyStart, slides } = slideRanges(fenced);
+    const prefix = fenced.slice(0, bodyStart);
+    const segs = slides.map((x) => fenced.slice(x.srcStart, x.srcEnd));
+    const moved = segs.splice(1, 1)[0]!; // B を先頭へ
+    segs.splice(0, 0, moved);
+    const out = prefix + segs.join('\n\n---\n\n') + '\n';
+    const after = parseDeck(out);
+    expect(after.slides.length).toBe(before); // フェンス内 --- で割れない
+    expect(after.slides.map((s) => s.content.split('\n')[0])).toEqual(['# B', '# A']);
+  });
+  it('回帰: headingDivider デッキの並べ替えでスライド枚数が増えない', () => {
+    const hd = '---\nheadingDivider: 2\n---\n## A\nbody a\n## B\nbody b\n## C\nbody c';
+    const before = parseDeck(hd).slides.length;
+    const { bodyStart, slides } = slideRanges(hd);
+    const prefix = hd.slice(0, bodyStart);
+    const segs = slides.map((x) => hd.slice(x.srcStart, x.srcEnd));
+    const moved = segs.splice(2, 1)[0]!; // C を先頭へ
+    segs.splice(0, 0, moved);
+    const out = prefix + segs.join('\n\n---\n\n') + '\n';
+    const after = parseDeck(out);
+    expect(after.slides.length).toBe(before); // 枚数不変(空スライドが増えない)
+    expect(after.slides.map((s) => s.content.split('\n')[0])).toEqual(['## C', '## A', '## B']);
   });
 });
 

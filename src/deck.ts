@@ -218,18 +218,22 @@ export interface SlideRange {
   srcEnd: number;
   visible: boolean;
 }
-export function slideRanges(source: string): SlideRange[] {
+// bodyStart は本文(フロントマターの後)が始まる文字オフセット。並べ替えの際の prefix(=フロントマター)
+// はこれで切り出す。先頭が空スライド(直後が ---)のとき srcStart は 0 になり得るため、スライド範囲から
+// prefix を導くとフロントマターを丸ごと失う。bodyStart を別に返してそれを防ぐ。
+export function slideRanges(source: string): { bodyStart: number; slides: SlideRange[] } {
   const text = source.replace(/\r\n?/g, '\n');
   const all = toLines(text);
   const { meta, bodyStart } = extractFrontmatter(all);
-  const body = all.slice(bodyStart);
-  return splitSlides(body, headingDividerLevel(meta))
+  const bodyOffset = bodyStart < all.length ? all[bodyStart]!.offset : text.length;
+  const slides = splitSlides(all.slice(bodyStart), headingDividerLevel(meta))
     .map(parseSlide)
     .map((s) => ({
       srcStart: s.srcStart,
       srcEnd: s.srcEnd,
       visible: (s.content.trim() !== '' || s.notes !== '') && !s.hidden,
     }));
+  return { bodyStart: bodyOffset, slides };
 }
 
 // 文字列を、各行の絶対オフセット付きの行配列にする。

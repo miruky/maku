@@ -2637,7 +2637,7 @@ function reorderSlides(from: number, insertPos: number): void {
   if (presenting) return;
   if (insertPos === from || insertPos === from + 1) return; // 同じ位置=何もしない
   const md = mdInput.value.replace(/\r\n?/g, '\n');
-  const ranges = slideRanges(md);
+  const { bodyStart, slides: ranges } = slideRanges(md);
   if (!ranges.length) return;
   const visIdx: number[] = [];
   ranges.forEach((r, i) => {
@@ -2646,7 +2646,8 @@ function reorderSlides(from: number, insertPos: number): void {
   if (from < 0 || from >= visIdx.length || insertPos < 0 || insertPos > visIdx.length) return;
   const fromFull = visIdx[from]!;
   const beforeFull = insertPos < visIdx.length ? visIdx[insertPos]! : ranges.length;
-  const prefix = md.slice(0, ranges[0]!.srcStart);
+  // prefix はフロントマター(本文開始オフセット)で切り出す。先頭空スライドでも欠落させない。
+  const prefix = md.slice(0, bodyStart);
   const segs = ranges.map((r) => md.slice(r.srcStart, r.srcEnd));
   const moved = segs.splice(fromFull, 1)[0]!;
   const insertAt = beforeFull > fromFull ? beforeFull - 1 : beforeFull;
@@ -2667,6 +2668,7 @@ function buildOverview(): void {
   const deck = parseDeck(mdInput.value);
   const grid = $('overview-grid');
   grid.innerHTML = '';
+  dragFrom = -1; // 再構築時に進行中ドラッグ状態を必ずリセット(古い index の流用を防ぐ)
   const titles = deckTitles(deck.slides);
   const canReorder = !presenting && deck.slides.length > 1;
   deck.slides.forEach((s, i) => {
@@ -2708,9 +2710,13 @@ function buildOverview(): void {
       cell.addEventListener('drop', (e) => {
         if (dragFrom < 0) return;
         e.preventDefault();
+        e.stopPropagation(); // deck-root の画像ドロップ等へバブルさせない
+        const from = dragFrom;
+        dragFrom = -1; // 消費して即クリア(dragend が来なくても古い index を残さない)
+        cell.classList.remove('ov-drop-before', 'ov-drop-after');
         const r = cell.getBoundingClientRect();
         const after = e.clientX > r.left + r.width / 2;
-        reorderSlides(dragFrom, i + (after ? 1 : 0));
+        reorderSlides(from, i + (after ? 1 : 0));
       });
     }
     grid.appendChild(cell);
