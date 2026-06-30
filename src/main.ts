@@ -403,6 +403,7 @@ theme: ai-hiru-mincho
             <dt>→ / Space</dt><dd>次へ(段階表示も進む)</dd>
             <dt>←</dt><dd>戻る</dd>
             <dt>Home / End</dt><dd>最初 / 最後</dd>
+            <dt>数字 + Enter</dt><dd>その番号のスライドへジャンプ</dd>
             <dt>F</dt><dd>全画面で発表</dd>
             <dt>O</dt><dd>スライド一覧</dd>
             <dt>S</dt><dd>発表者ノート(次スライドのプレビュー・ステップ進捗・タイマーつき)</dd>
@@ -2557,6 +2558,9 @@ function setBlank(mode: 'black' | 'white' | null): void {
 blankEl.addEventListener('pointerdown', () => setBlank(null));
 
 // ── キーボード ──
+// 数字を打って Enter でそのスライド番号へ飛ぶ(発表中の Q&A・長いデッキ向け)。
+let jumpBuf = '';
+let jumpTimer = 0;
 const anyOverlayOpen = (): boolean =>
   !$('overview-overlay').hidden ||
   !$('theme-modal').hidden ||
@@ -2619,6 +2623,26 @@ window.addEventListener('keydown', (ev) => {
       }
       if (/^[a-zA-Z?]$/.test(ev.key)) return; // 図形選択中はレターのショートカットを誤発火させない
     }
+  }
+
+  // 数字+Enter でスライド番号へジャンプ。数字は一定時間で自動的にリセットする。
+  if (/^[0-9]$/.test(ev.key)) {
+    ev.preventDefault();
+    jumpBuf += ev.key;
+    if (jumpTimer) window.clearTimeout(jumpTimer);
+    jumpTimer = window.setTimeout(() => {
+      jumpBuf = '';
+    }, 2000);
+    toast(`スライド ${jumpBuf} へ (Enter で移動)`);
+    return;
+  }
+  if (ev.key === 'Enter' && jumpBuf) {
+    ev.preventDefault();
+    const n = Math.max(1, Math.min(presenter.total, parseInt(jumpBuf, 10)));
+    jumpBuf = '';
+    if (jumpTimer) window.clearTimeout(jumpTimer);
+    nav(() => presenter.go(n - 1));
+    return;
   }
 
   // ナビゲーション・ヘルプ(常時有効)。
