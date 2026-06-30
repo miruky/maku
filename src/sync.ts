@@ -6,7 +6,7 @@ export const SYNC_CHANNEL = 'maku-present';
 
 export type SyncMsg =
   | { t: 'state'; index: number; step: number; total: number } // 本体→コンソール: 現在位置・ステップ
-  | { t: 'deck' } // 本体→コンソール: md/テーマが変わったので localStorage を読み直す合図
+  | { t: 'deck'; md: string; theme: string } // 本体→コンソール: 本文とテーマ(チャンネルを真実とする)
   | { t: 'cmd'; cmd: 'next' | 'prev' | 'first' | 'last' | 'goto'; index?: number } // コンソール→本体: 操作
   | { t: 'hello' }; // コンソール→本体: 起動したので現在状態をください
 

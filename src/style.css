@@ -2914,12 +2914,27 @@ body.faux-full .deck-root {
 }
 .pv-deck {
   width: 100%;
-  max-width: 100%;
+  /* 高さ予算 × 縦横比 で最大幅を決めることで、縦長デッキでも横長デッキでも枠内に収める
+     (はみ出し=クリップを防ぐ。本体ビューアの deck-root と同じ手法)。 */
+  max-width: calc((100vh - 150px) * var(--deck-ar-num, 1.7778));
   aspect-ratio: var(--deck-ar, 16 / 9);
+  margin: 0 auto;
   border-radius: 10px;
   overflow: hidden;
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
   flex: 0 0 auto;
+}
+.pv-deck-next {
+  /* 次スライドはサイド列の小枠。高さ予算を抑えて時計・ノートを圧迫しない。 */
+  max-width: calc(34vh * var(--deck-ar-num, 1.7778));
+}
+.pv-banner {
+  flex: 0 0 auto;
+  background: #5b3b00;
+  color: #ffd9a8;
+  padding: 8px 14px;
+  font-size: 13px;
+  text-align: center;
 }
 .pv-clockrow {
   display: flex;

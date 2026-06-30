@@ -92,6 +92,7 @@ export class Presenter {
   }
 
   go(i: number, atEnd = false): void {
+    if (!Number.isFinite(i)) return; // NaN/Infinity でナビゲーションを壊さない
     const dir = i < this.idx ? 'back' : 'fwd';
     this.idx = Math.max(0, Math.min(this.total - 1, i));
     this.step = 1;

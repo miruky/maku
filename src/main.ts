@@ -580,48 +580,6 @@ const presenter = new Presenter(
   () => broadcastState(), // スライド/ステップが変わるたびに発表者コンソールへ位置を送る
 );
 
-// 現在位置を発表者コンソールへ送る。スライドにもステップにも反応する(applySteps 経由)。
-function broadcastState(): void {
-  sync?.postMessage({
-    t: 'state',
-    index: presenter.index,
-    step: presenter.currentStep,
-    total: presenter.total,
-  } satisfies SyncMsg);
-}
-
-// 発表者コンソールを別ウィンドウで開く。コンソールは localStorage の md/テーマを読み、
-// 位置はチャンネルで受け取る。ポップアップがブロックされたら案内する。
-function openPresenterView(): void {
-  const w = window.open('presenter.html', 'maku-presenter', 'width=1180,height=760');
-  if (!w) {
-    toast('ポップアップを許可すると発表者ビューを開けます');
-    return;
-  }
-  // hello を取りこぼした場合の保険として、少し後に現在位置を送り直す。
-  window.setTimeout(broadcastState, 600);
-}
-
-if (sync) {
-  sync.onmessage = (e: MessageEvent<SyncMsg>): void => {
-    const m = e.data;
-    if (m.t === 'cmd') {
-      // コンソールからの操作。本体が唯一の状態保持者なので、ここで実行して state を返す。
-      nav(() => {
-        if (m.cmd === 'next') presenter.next();
-        else if (m.cmd === 'prev') presenter.prev();
-        else if (m.cmd === 'first') presenter.go(0);
-        else if (m.cmd === 'last') presenter.go(presenter.total - 1);
-        else if (m.cmd === 'goto' && typeof m.index === 'number') presenter.go(m.index);
-      });
-    } else if (m.t === 'hello') {
-      // 新しく開いたコンソールへ、デッキ読み直しの合図と現在位置を送る。
-      sync?.postMessage({ t: 'deck' } satisfies SyncMsg);
-      broadcastState();
-    }
-  };
-}
-
 let currentTheme = themeById(readTheme());
 
 function readTheme(): string {
@@ -654,7 +612,7 @@ function setTheme(id: string, persist = true): void {
       // 保存できなくても表示は反映する
     }
     history.replaceState(null, '', urlFor(presenter.index + 1));
-    sync?.postMessage({ t: 'deck' } satisfies SyncMsg); // コンソールへテーマ変更を知らせる
+    broadcastDeck(); // コンソールへテーマ変更を知らせる
   }
 }
 
@@ -692,7 +650,7 @@ function rebuild(keepIndex = true): void {
   } catch {
     // 保存失敗は無視
   }
-  sync?.postMessage({ t: 'deck' } satisfies SyncMsg); // 発表者コンソールに本文更新を知らせる
+  broadcastDeck(); // 発表者コンソールに本文更新を知らせる
 }
 
 // ── スライド直接編集(PowerPoint風の自由配置 + view ⇄ md の双方向) ──
@@ -709,6 +667,66 @@ let editingShapeId = '';
 let editStart = 0;
 let editEnd = 0;
 const overlay = loadOverlay();
+
+// ── 発表者コンソール同期(currentTheme / editingBlock の宣言後に置く) ──
+// 現在位置をコンソールへ送る。go()/setDeck() 中は applySteps が複数回走るため、マイクロタスクで
+// 1回にまとめ、途中の step=1 を送らず最終状態だけを送る。
+let stateQueued = false;
+function broadcastState(): void {
+  if (!sync || stateQueued) return;
+  stateQueued = true;
+  queueMicrotask(() => {
+    stateQueued = false;
+    sync.postMessage({
+      t: 'state',
+      index: presenter.index,
+      step: presenter.currentStep,
+      total: presenter.total,
+    } satisfies SyncMsg);
+  });
+}
+// 本文とテーマをコンソールへ送る。チャンネルを真実とし、URL/フロントマター由来のテーマや
+// localStorage が読めない環境でもコンソールが正しく描画できるようにする。
+function broadcastDeck(): void {
+  sync?.postMessage({ t: 'deck', md: mdInput.value, theme: currentTheme.id } satisfies SyncMsg);
+}
+let consoleOpen = false; // このタブから発表者コンソールを開いたか(複数タブでの誤応答を防ぐ)
+function openPresenterView(): void {
+  const w = window.open('presenter.html', 'maku-presenter', 'width=1180,height=760');
+  if (!w) {
+    toast('ポップアップを許可すると発表者ビューを開けます');
+    return;
+  }
+  if (!sync) toast('このブラウザは発表者ビューの同期に未対応です');
+  consoleOpen = true;
+  // hello を取りこぼした場合の保険として、少し後に現在のデッキ/位置を送り直す。
+  window.setTimeout(() => {
+    broadcastDeck();
+    broadcastState();
+  }, 600);
+}
+if (sync) {
+  sync.onmessage = (e: MessageEvent<SyncMsg>): void => {
+    const m = e.data;
+    // このタブからコンソールを開いていないなら応答しない(複数タブが1つのコマンドに
+    // 一斉反応して背面タブまで動く/状態が競合するのを防ぐ)。
+    if (!consoleOpen) return;
+    if (m.t === 'cmd') {
+      if (editingBlock) return; // 直接編集中はリモート操作で編集を中断しない
+      nav(() => {
+        if (m.cmd === 'next') presenter.next();
+        else if (m.cmd === 'prev') presenter.prev();
+        else if (m.cmd === 'first') presenter.go(0);
+        else if (m.cmd === 'last') presenter.go(presenter.total - 1);
+        else if (m.cmd === 'goto' && Number.isInteger(m.index)) presenter.go(m.index!);
+      });
+    } else if (m.t === 'hello') {
+      // 新しく開いたコンソールへ現在のデッキと位置を送る。
+      broadcastDeck();
+      broadcastState();
+    }
+  };
+}
 
 function rangeOf(el: HTMLElement): [number, number] {
   const m = /^(\d+)-(\d+)$/.exec(el.dataset.src ?? '');
