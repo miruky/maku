@@ -30,10 +30,16 @@ export function inlineToMd(node: Node): string {
       return `~~${kids()}~~`;
     case 'MARK':
       return `==${kids()}==`;
-    case 'SUP':
-      return `^${kids()}^`;
-    case 'SUB':
-      return `~${kids()}~`;
+    // 上付き/下付きは英数記号のみ往復可能。空白等で記法に戻せない中身(編集で混入)は
+    // 壊れた ~ / ^ を残さず素のテキストにフォールバックする(再パースで打消し等に化けない)。
+    case 'SUP': {
+      const k = kids();
+      return /^[0-9A-Za-z+\-().]+$/.test(k) ? `^${k}^` : k;
+    }
+    case 'SUB': {
+      const k = kids();
+      return /^[0-9A-Za-z+\-().]+$/.test(k) ? `~${k}~` : k;
+    }
     case 'CODE':
       return '`' + (el.textContent ?? '') + '`';
     case 'A':

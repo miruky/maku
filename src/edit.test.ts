@@ -27,6 +27,18 @@ describe('blockToMd(view → md)', () => {
     expect(blockToMd(first('水は H~2~O'))).toBe('水は H~2~O');
   });
 
+  it('記法に戻せない上付き/下付き(空白混入など)は壊れた ~/^ を残さずプレーンに落とす', () => {
+    // 編集で sub/sup の中身に空白が入ると ~x~/^x^ 記法では表せない。素のテキストへ。
+    const p = document.createElement('p');
+    p.innerHTML = 'H<sub>2 と 3</sub>O';
+    expect(blockToMd(p)).toBe('H2 と 3O');
+    const p2 = document.createElement('p');
+    p2.innerHTML = 'x<sup>n m</sup>';
+    expect(blockToMd(p2)).toBe('xn m');
+    // 落とした結果が打消し ~~ や別記法に化けないこと。
+    expect(blockToMd(p)).not.toContain('~');
+  });
+
   it('リンク', () => {
     expect(blockToMd(first('[名](https://e.com)'))).toBe('[名](https://e.com)');
   });

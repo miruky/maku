@@ -16,8 +16,11 @@ describe('renderMarkdown', () => {
 
   it('ハイライト ==x== / 上付き ^x^ / 下付き ~x~', () => {
     expect(renderMarkdown('==重要==')).toContain('<mark>重要</mark>');
+    expect(renderMarkdown('==重要 な 点==')).toContain('<mark>重要 な 点</mark>'); // 中間の空白は可
     expect(renderMarkdown('x^2^')).toContain('x<sup>2</sup>');
     expect(renderMarkdown('H~2~O')).toContain('H<sub>2</sub>O');
+    expect(renderMarkdown('Ca^2+^')).toContain('Ca<sup>2+</sup>'); // 電荷(+ - ( ) . を許可)
+    expect(renderMarkdown('C~6~H~12~O~6~')).toContain('C<sub>6</sub>H<sub>12</sub>O<sub>6</sub>');
     // 打ち消し ~~…~~ は下付きに食われない(先に処理)。
     const del = renderMarkdown('~~消した~~');
     expect(del).toContain('<del>消した</del>');
@@ -27,6 +30,21 @@ describe('renderMarkdown', () => {
     expect(renderMarkdown('2 ^ 3 ^ 4')).not.toContain('<sup>');
     // 列区切りの === は本文インラインに来てもハイライトにならない。
     expect(renderMarkdown('2019 === 開始')).not.toContain('<mark>');
+  });
+
+  it('インライン記法の誤検出を抑える(回帰防止: 和文範囲・脚注・空マーク)', () => {
+    // 和文の波ダッシュ範囲(営業時間など)を下付きにしない。
+    expect(renderMarkdown('9~17時、12~13時')).not.toContain('<sub>');
+    expect(renderMarkdown('受付は 9~17 です')).not.toContain('<sub>'); // 数字のみでも空白隣接で対象外
+    // 脚注参照 [^1] を上付きに巻き込まない(脚注は未対応のため素通し)。
+    const fn = renderMarkdown('これは脚注です[^1]。本文[^2]。');
+    expect(fn).not.toContain('<sup>');
+    expect(fn).toContain('[^1]');
+    expect(fn).toContain('[^2]');
+    // 空/空白のみのハイライトは作らない。
+    expect(renderMarkdown('== ==')).not.toContain('<mark>');
+    // 打消し内に単独 ~ があっても下付きに化けない。
+    expect(renderMarkdown('~~a~b~~')).not.toContain('<sub>');
   });
 
   it('_ の強調は語境界のみ。語中アンダースコア(snake_case / URL)は斜体化しない', () => {
