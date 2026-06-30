@@ -4,8 +4,40 @@ import {
   parseAutoslideMs,
   parseDeck,
   setBlockMarker,
+  slideRanges,
   stripRevealDirectiveLines,
 } from './deck';
+
+// 並べ替えで隠しスライドを取りこぼさないことを担保する(slideRanges は全スライドを返し、
+// visible だけ並べると deck.slides と一致する)。
+describe('slideRanges(並べ替え用・隠しスライド保全)', () => {
+  const md = '# A\n\n---\n\n<!-- hide -->\n# 隠し\n\n---\n\n# B';
+  it('隠し・空も含む全スライドを範囲付きで返す', () => {
+    const r = slideRanges(md);
+    expect(r).toHaveLength(3);
+    expect(r.map((x) => x.visible)).toEqual([true, false, true]);
+  });
+  it('visible のみ並べると deck.slides と同順・同内容', () => {
+    const r = slideRanges(md);
+    const visText = r.filter((x) => x.visible).map((x) => md.slice(x.srcStart, x.srcEnd).trim());
+    const deckText = parseDeck(md).slides.map((s) => s.content.split('\n')[0]);
+    expect(visText[0]).toContain('# A');
+    expect(visText[1]).toContain('# B');
+    expect(deckText).toEqual(['# A', '# B']); // 隠しは除外
+  });
+  it('全 segment を join し直すと、隠しスライドが原文に残る(往復で消えない)', () => {
+    const r = slideRanges(md);
+    const prefix = md.slice(0, r[0]!.srcStart);
+    const segs = r.map((x) => md.slice(x.srcStart, x.srcEnd));
+    // B を先頭へ移す並べ替え相当(full index 2 を 0 の前へ)
+    const moved = segs.splice(2, 1)[0]!;
+    segs.splice(0, 0, moved);
+    const newMd = prefix + segs.join('\n\n---\n\n') + '\n';
+    expect(newMd).toContain('<!-- hide -->'); // 隠し指示が残る
+    expect(parseDeck(newMd).slides.map((s) => s.content.split('\n')[0])).toEqual(['# B', '# A']);
+    expect(slideRanges(newMd).filter((x) => !x.visible)).toHaveLength(1); // 隠しスライドが1枚残存
+  });
+});
 
 describe('parseDeck', () => {
   it('フロントマターを読み、本文から除く', () => {

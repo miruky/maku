@@ -210,6 +210,28 @@ export function parseDeck(source: string): Deck {
   return { meta, slides };
 }
 
+// 並べ替え用に、全スライド(隠し・空も含む)の原文範囲と表示可否を返す。visible は parseDeck の
+// フィルタ(空でなく hidden でない)と一致させるので、visible だけ並べると deck.slides と同順になる。
+// これを使えば、表示スライドの並べ替え時も隠し/空スライドの原文を取りこぼさずに保てる。
+export interface SlideRange {
+  srcStart: number;
+  srcEnd: number;
+  visible: boolean;
+}
+export function slideRanges(source: string): SlideRange[] {
+  const text = source.replace(/\r\n?/g, '\n');
+  const all = toLines(text);
+  const { meta, bodyStart } = extractFrontmatter(all);
+  const body = all.slice(bodyStart);
+  return splitSlides(body, headingDividerLevel(meta))
+    .map(parseSlide)
+    .map((s) => ({
+      srcStart: s.srcStart,
+      srcEnd: s.srcEnd,
+      visible: (s.content.trim() !== '' || s.notes !== '') && !s.hidden,
+    }));
+}
+
 // 文字列を、各行の絶対オフセット付きの行配列にする。
 function toLines(text: string): SourceLine[] {
   const out: SourceLine[] = [];

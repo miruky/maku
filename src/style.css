@@ -2181,6 +2181,32 @@ body {
   box-shadow: 0 0 0 1px var(--ui-accent);
 }
 
+/* ドラッグで並べ替え。掴めることを示すカーソルと、ドロップ位置の挿入バー。 */
+.ov-cell[draggable='true'] {
+  cursor: grab;
+}
+.ov-cell.ov-dragging {
+  opacity: 0.4;
+  cursor: grabbing;
+}
+.ov-cell.ov-drop-before::before,
+.ov-cell.ov-drop-after::after {
+  content: '';
+  position: absolute;
+  top: 6%;
+  bottom: 6%;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--ui-accent);
+  z-index: 2;
+}
+.ov-cell.ov-drop-before::before {
+  left: -5px;
+}
+.ov-cell.ov-drop-after::after {
+  right: -5px;
+}
+
 .ov-thumb {
   position: relative;
   aspect-ratio: 16 / 9;

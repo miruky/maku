@@ -1,5 +1,5 @@
 import './style.css';
-import { deckRatio, deleteStartWithMarkers, parseDeck, setBlockMarker, stripRevealDirectiveLines, type BlockMarker, type RevealMode } from './deck';
+import { deckRatio, deleteStartWithMarkers, parseDeck, setBlockMarker, slideRanges, stripRevealDirectiveLines, type BlockMarker, type RevealMode } from './deck';
 import { blockToMd } from './edit';
 import {
   deckFilename,
@@ -410,7 +410,7 @@ theme: ai-hiru-mincho
             <dt>数字 + Enter</dt><dd>その番号のスライドへジャンプ</dd>
             <dt>Ctrl / ⌘ + Z</dt><dd>取り消し(Shift を足すとやり直し)。直接編集・図形配置・削除も戻せます</dd>
             <dt>F</dt><dd>全画面で発表</dd>
-            <dt>O</dt><dd>スライド一覧</dd>
+            <dt>O</dt><dd>スライド一覧(サムネイルをドラッグで並べ替え)</dd>
             <dt>S</dt><dd>発表者ノート(次スライドのプレビュー・ステップ進捗・タイマーつき)</dd>
             <dt>V</dt><dd>発表者ビュー(別ウィンドウ。2画面で現スライド・次・ノート・タイマーを手元に)</dd>
             <dt>E</dt><dd>Markdown エディタ</dd>
@@ -2631,12 +2631,44 @@ function flash(btn: HTMLElement): void {
 }
 
 // ── 一覧 ──
+// 一覧での並べ替え。表示スライド from を、表示位置 insertPos の直前へ移す(insertPos は元の表示配列基準、
+// 0..件数)。隠し/空スライドも含む全 segment を操作対象にして取りこぼさず、安定ID付きの図形も追従する。
+function reorderSlides(from: number, insertPos: number): void {
+  if (presenting) return;
+  if (insertPos === from || insertPos === from + 1) return; // 同じ位置=何もしない
+  const md = mdInput.value.replace(/\r\n?/g, '\n');
+  const ranges = slideRanges(md);
+  if (!ranges.length) return;
+  const visIdx: number[] = [];
+  ranges.forEach((r, i) => {
+    if (r.visible) visIdx.push(i);
+  });
+  if (from < 0 || from >= visIdx.length || insertPos < 0 || insertPos > visIdx.length) return;
+  const fromFull = visIdx[from]!;
+  const beforeFull = insertPos < visIdx.length ? visIdx[insertPos]! : ranges.length;
+  const prefix = md.slice(0, ranges[0]!.srcStart);
+  const segs = ranges.map((r) => md.slice(r.srcStart, r.srcEnd));
+  const moved = segs.splice(fromFull, 1)[0]!;
+  const insertAt = beforeFull > fromFull ? beforeFull - 1 : beforeFull;
+  segs.splice(insertAt, 0, moved);
+  const newMd = prefix + segs.join('\n\n---\n\n') + '\n';
+  if (newMd === md) return;
+  commitEdit();
+  deselect();
+  mdInput.value = newMd;
+  rebuild(true); // 再描画・保存・コンソール同期・取り消し履歴へ(1手で戻せる)
+  buildOverview();
+  toast('スライドを並べ替えました');
+}
+
+let dragFrom = -1;
 function buildOverview(): void {
   commitEdit(); // 進行中の編集を確定してからサムネイル化(古い/プレースホルダ表示を防ぐ)
   const deck = parseDeck(mdInput.value);
   const grid = $('overview-grid');
   grid.innerHTML = '';
   const titles = deckTitles(deck.slides);
+  const canReorder = !presenting && deck.slides.length > 1;
   deck.slides.forEach((s, i) => {
     const cell = document.createElement('button');
     cell.className = 'ov-cell';
@@ -2650,6 +2682,37 @@ function buildOverview(): void {
       nav(() => presenter.go(i));
       toggle('overview-overlay', false);
     });
+    // ── ドラッグで並べ替え(マウス/トラックパッド)──
+    if (canReorder) {
+      cell.draggable = true;
+      cell.dataset.idx = String(i);
+      cell.addEventListener('dragstart', (e) => {
+        dragFrom = i;
+        cell.classList.add('ov-dragging');
+        if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+      });
+      cell.addEventListener('dragend', () => {
+        dragFrom = -1;
+        grid.querySelectorAll('.ov-cell').forEach((c) => c.classList.remove('ov-drop-before', 'ov-drop-after', 'ov-dragging'));
+      });
+      cell.addEventListener('dragover', (e) => {
+        if (dragFrom < 0) return;
+        e.preventDefault();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+        const r = cell.getBoundingClientRect();
+        const after = e.clientX > r.left + r.width / 2;
+        cell.classList.toggle('ov-drop-after', after);
+        cell.classList.toggle('ov-drop-before', !after);
+      });
+      cell.addEventListener('dragleave', () => cell.classList.remove('ov-drop-before', 'ov-drop-after'));
+      cell.addEventListener('drop', (e) => {
+        if (dragFrom < 0) return;
+        e.preventDefault();
+        const r = cell.getBoundingClientRect();
+        const after = e.clientX > r.left + r.width / 2;
+        reorderSlides(dragFrom, i + (after ? 1 : 0));
+      });
+    }
     grid.appendChild(cell);
   });
 }
