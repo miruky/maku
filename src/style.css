@@ -1588,7 +1588,7 @@ body {
   border-radius: 10px;
   background: var(--ui-panel, #fff);
   box-shadow: 0 10px 34px rgba(0, 0, 0, 0.26);
-  border: 1px solid var(--ui-rule, rgba(0, 0, 0, 0.12));
+  border: 1px solid var(--ui-line, rgba(0, 0, 0, 0.12));
   font-family: var(--ui-sans);
 }
 .ctx-item {
@@ -1602,7 +1602,7 @@ body {
   border: 0;
   border-radius: 6px;
   background: transparent;
-  color: var(--ui-fg, #111);
+  color: var(--ui-ink, #232019);
   font-size: 13px;
   text-align: left;
   cursor: pointer;
@@ -1622,7 +1622,7 @@ body {
 .ctx-sep {
   height: 1px;
   margin: 5px 6px;
-  background: var(--ui-rule, rgba(0, 0, 0, 0.1));
+  background: var(--ui-line, rgba(0, 0, 0, 0.1));
 }
 /* サブメニュー: 親項目ホバーで右に展開。 */
 .ctx-sub {
@@ -1638,7 +1638,7 @@ body {
   border-radius: 10px;
   background: var(--ui-panel, #fff);
   box-shadow: 0 10px 34px rgba(0, 0, 0, 0.26);
-  border: 1px solid var(--ui-rule, rgba(0, 0, 0, 0.12));
+  border: 1px solid var(--ui-line, rgba(0, 0, 0, 0.12));
 }
 .ctx-item.has-sub:hover > .ctx-sub {
   display: flex;
