@@ -614,6 +614,7 @@ function setTheme(id: string, persist = true): void {
     }
     history.replaceState(null, '', urlFor(presenter.index + 1));
     broadcastDeck(); // コンソールへテーマ変更を知らせる
+    scheduleSnapshot(); // テーマ変更も取り消し履歴に含める(restore 中は guard で無視)
   }
 }
 
@@ -733,7 +734,7 @@ if (sync) {
 // ── 取り消し / やり直し(Undo/Redo)──
 // {md, overlay} のスナップショット履歴。直接編集・自由配置・スライド削除など textarea 外の操作にも
 // 取り消しを効かせる。textarea/contenteditable にフォーカス中はネイティブの取り消しを尊重して横取りしない。
-type HistEntry = { md: string; ov: string };
+type HistEntry = { md: string; ov: string; theme: string };
 const HIST_CAP = 100;
 let hist: HistEntry[] = [];
 let histIdx = -1;
@@ -756,9 +757,9 @@ function scheduleSnapshot(): void {
 }
 function snapshot(): void {
   if (restoring) return;
-  const cur: HistEntry = { md: mdInput.value, ov: JSON.stringify(overlay) };
+  const cur: HistEntry = { md: mdInput.value, ov: JSON.stringify(overlay), theme: currentTheme.id };
   const top = hist[histIdx];
-  if (top && top.md === cur.md && top.ov === cur.ov) return; // 変化なしは積まない
+  if (top && top.md === cur.md && top.ov === cur.ov && top.theme === cur.theme) return; // 変化なしは積まない
   hist = hist.slice(0, histIdx + 1); // やり直し分を捨てる
   hist.push(cur);
   if (hist.length > HIST_CAP) hist = hist.slice(hist.length - HIST_CAP);
@@ -772,6 +773,7 @@ function restore(entry: HistEntry): void {
   }
   closeCtxMenu();
   deselect();
+  if (entry.theme && entry.theme !== currentTheme.id) setTheme(entry.theme, true);
   mdInput.value = entry.md;
   for (const k of Object.keys(overlay)) delete overlay[k];
   Object.assign(overlay, JSON.parse(entry.ov) as typeof overlay);
@@ -779,13 +781,26 @@ function restore(entry: HistEntry): void {
   rebuild(true);
   restoring = false;
 }
-function undo(): void {
-  // 直近の操作がまだ未確定(デバウンス待ち)なら先に確定してから戻す。
+// 取り消し/やり直しの前に、進行中の編集とデバウンス待ちの変更をすべて確定して履歴へ積む。
+// これをしないと「直前の編集が未記録のまま」戻って編集が失われる/古い分岐が復活する。
+function flushPending(): void {
+  commitEdit(); // 進行中の直接編集(本文/テキスト図形)を確定し editingBlock を解放
+  if (rebuildTimer) {
+    window.clearTimeout(rebuildTimer);
+    rebuildTimer = 0;
+    if (!editingBlock) {
+      dedupeSlideIds();
+      rebuild(true);
+    }
+  }
   if (snapTimer) {
     window.clearTimeout(snapTimer);
     snapTimer = 0;
     snapshot();
   }
+}
+function undo(): void {
+  flushPending();
   if (histIdx <= 0) {
     toast('これ以上戻せません');
     return;
@@ -795,6 +810,7 @@ function undo(): void {
   toast('取り消しました');
 }
 function redo(): void {
+  flushPending();
   if (histIdx >= hist.length - 1) {
     toast('やり直す操作がありません');
     return;
@@ -1937,6 +1953,8 @@ function addFreeImage(src: string, alt: string, at?: { x: number; y: number }): 
   const probe = new Image();
   const place = (ar: number): void => {
     if (!sid) return;
+    // 非同期ロード中に取り消し等で配置先スライドが消えていたら、孤児 overlay を作らない。
+    if (!parseDeck(mdInput.value).slides.some((s) => s.id === sid)) return;
     const o = ensureSlide(overlay, sid);
     const box = imageBox(ar, at);
     const shape: ImageShape = { id: newId(), kind: 'image', src, alt, ar, ...box };
@@ -2740,7 +2758,7 @@ window.addEventListener('keydown', (ev) => {
   // 発表中は誤って本文を巻き戻さないよう無効。
   if ((ev.ctrlKey || ev.metaKey) && !ev.altKey && (ev.key === 'z' || ev.key === 'Z')) {
     ev.preventDefault();
-    if (!presenting) {
+    if (!presenting && !anyOverlayOpen()) {
       if (ev.shiftKey) redo();
       else undo();
     }
@@ -2748,7 +2766,7 @@ window.addEventListener('keydown', (ev) => {
   }
   if ((ev.ctrlKey || ev.metaKey) && !ev.altKey && (ev.key === 'y' || ev.key === 'Y')) {
     ev.preventDefault();
-    if (!presenting) redo();
+    if (!presenting && !anyOverlayOpen()) redo();
     return;
   }
   if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
