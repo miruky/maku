@@ -1521,7 +1521,16 @@ deckRoot.addEventListener(
     e.preventDefault();
     e.stopPropagation();
     const code = btn.closest('.code-block')?.querySelector('code');
-    const text = code?.textContent ?? '';
+    // 行ハイライト時はコードが <div class="cl"> 行に分かれており textContent では改行が消える。
+    // その場合は各行を改行で連結する(通常コードは textContent に生の改行が残る)。
+    const lineDivs = code?.querySelectorAll(':scope > .cl');
+    const text = code
+      ? lineDivs && lineDivs.length
+        ? Array.from(lineDivs)
+            .map((d) => d.textContent ?? '')
+            .join('\n')
+        : (code.textContent ?? '')
+      : '';
     if (!text) return;
     const ok = (): void => {
       btn.classList.add('copied');
