@@ -18,7 +18,7 @@ import {
   isTextShape,
   loadOverlay,
   newId,
-  saveOverlay,
+  saveOverlay as saveOverlayRaw,
   shapeLabel,
   slideOverlay,
   type Box,
@@ -408,6 +408,7 @@ theme: ai-hiru-mincho
             <dt>←</dt><dd>戻る</dd>
             <dt>Home / End</dt><dd>最初 / 最後</dd>
             <dt>数字 + Enter</dt><dd>その番号のスライドへジャンプ</dd>
+            <dt>Ctrl / ⌘ + Z</dt><dd>取り消し(Shift を足すとやり直し)。直接編集・図形配置・削除も戻せます</dd>
             <dt>F</dt><dd>全画面で発表</dd>
             <dt>O</dt><dd>スライド一覧</dd>
             <dt>S</dt><dd>発表者ノート(次スライドのプレビュー・ステップ進捗・タイマーつき)</dd>
@@ -651,6 +652,7 @@ function rebuild(keepIndex = true): void {
     // 保存失敗は無視
   }
   broadcastDeck(); // 発表者コンソールに本文更新を知らせる
+  scheduleSnapshot(); // 取り消し用に状態(md/overlay)を履歴へ(デバウンス)
 }
 
 // ── スライド直接編集(PowerPoint風の自由配置 + view ⇄ md の双方向) ──
@@ -726,6 +728,80 @@ if (sync) {
       broadcastState();
     }
   };
+}
+
+// ── 取り消し / やり直し(Undo/Redo)──
+// {md, overlay} のスナップショット履歴。直接編集・自由配置・スライド削除など textarea 外の操作にも
+// 取り消しを効かせる。textarea/contenteditable にフォーカス中はネイティブの取り消しを尊重して横取りしない。
+type HistEntry = { md: string; ov: string };
+const HIST_CAP = 100;
+let hist: HistEntry[] = [];
+let histIdx = -1;
+let restoring = false;
+let snapTimer = 0;
+
+// overlay 保存を包み、保存のたびにスナップショットを予約する(全 saveOverlay 呼び出しが対象)。
+function saveOverlay(o: typeof overlay): boolean {
+  const ok = saveOverlayRaw(o);
+  scheduleSnapshot();
+  return ok;
+}
+function scheduleSnapshot(): void {
+  if (restoring) return;
+  if (snapTimer) window.clearTimeout(snapTimer);
+  snapTimer = window.setTimeout(() => {
+    snapTimer = 0;
+    snapshot();
+  }, 350);
+}
+function snapshot(): void {
+  if (restoring) return;
+  const cur: HistEntry = { md: mdInput.value, ov: JSON.stringify(overlay) };
+  const top = hist[histIdx];
+  if (top && top.md === cur.md && top.ov === cur.ov) return; // 変化なしは積まない
+  hist = hist.slice(0, histIdx + 1); // やり直し分を捨てる
+  hist.push(cur);
+  if (hist.length > HIST_CAP) hist = hist.slice(hist.length - HIST_CAP);
+  histIdx = hist.length - 1;
+}
+function restore(entry: HistEntry): void {
+  restoring = true;
+  if (snapTimer) {
+    window.clearTimeout(snapTimer);
+    snapTimer = 0;
+  }
+  closeCtxMenu();
+  deselect();
+  mdInput.value = entry.md;
+  for (const k of Object.keys(overlay)) delete overlay[k];
+  Object.assign(overlay, JSON.parse(entry.ov) as typeof overlay);
+  saveOverlayRaw(overlay);
+  rebuild(true);
+  restoring = false;
+}
+function undo(): void {
+  // 直近の操作がまだ未確定(デバウンス待ち)なら先に確定してから戻す。
+  if (snapTimer) {
+    window.clearTimeout(snapTimer);
+    snapTimer = 0;
+    snapshot();
+  }
+  if (histIdx <= 0) {
+    toast('これ以上戻せません');
+    return;
+  }
+  histIdx -= 1;
+  restore(hist[histIdx]!);
+  toast('取り消しました');
+}
+function redo(): void {
+  if (histIdx >= hist.length - 1) {
+    toast('やり直す操作がありません');
+    return;
+  }
+  histIdx += 1;
+  restore(hist[histIdx]!);
+  toast('やり直しました');
 }
 
 function rangeOf(el: HTMLElement): [number, number] {
@@ -2175,6 +2251,12 @@ function dedupeSlideIds(): boolean {
   dedupeSlideIds(); // 保存済みデッキ内の重複 id を解消(コピペ由来の overlay 共有を防ぐ)
   rebuild(false);
   if (Number.isFinite(start) && start > 0) presenter.go(start);
+  // 取り消しのベースラインを即座に確定(読み込み直後に操作されても初期状態を失わないように)。
+  if (snapTimer) {
+    window.clearTimeout(snapTimer);
+    snapTimer = 0;
+  }
+  snapshot();
 }
 
 // ── ナビ ──
@@ -2652,6 +2734,21 @@ window.addEventListener('keydown', (ev) => {
   // テキスト入力中・対話的コントロールにフォーカスがあるときは横取りしない
   // (ボタンの Space/Enter による二重発火を防ぐ)。
   if (target?.closest('input, textarea, select, a[href], button, [contenteditable=""], [contenteditable="true"]')) {
+    return;
+  }
+  // 取り消し / やり直し(textarea 等にフォーカス中は上の return で素通し=ネイティブ取り消しを尊重)。
+  // 発表中は誤って本文を巻き戻さないよう無効。
+  if ((ev.ctrlKey || ev.metaKey) && !ev.altKey && (ev.key === 'z' || ev.key === 'Z')) {
+    ev.preventDefault();
+    if (!presenting) {
+      if (ev.shiftKey) redo();
+      else undo();
+    }
+    return;
+  }
+  if ((ev.ctrlKey || ev.metaKey) && !ev.altKey && (ev.key === 'y' || ev.key === 'Y')) {
+    ev.preventDefault();
+    if (!presenting) redo();
     return;
   }
   if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
