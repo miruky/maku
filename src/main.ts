@@ -28,8 +28,8 @@ import {
 } from './overlay';
 import { deckTitles, slideHtml } from './render';
 import { Annotator } from './annot';
-import { typesetMath } from './math';
-import { resetMermaid, typesetMermaid } from './mermaid';
+import { hasPendingMath, typesetMath } from './math';
+import { hasPendingMermaid, resetMermaid, typesetMermaid } from './mermaid';
 import { Presenter } from './present';
 import {
   applyTheme,
@@ -2255,7 +2255,7 @@ async function runExport(kind: string): Promise<void> {
     return;
   }
   if (kind === 'print') {
-    doPrint();
+    await doPrint();
     return;
   }
   if (kind === 'md') {
@@ -2311,7 +2311,7 @@ async function runExport(kind: string): Promise<void> {
   }
 }
 
-function doPrint(): void {
+async function doPrint(): Promise<void> {
   commitEdit(); // 進行中の編集(本文/テキスト箱)を確定してから出力(古い内容で印刷しない)
   const deck = parseDeck(mdInput.value);
   const host = $('print-deck');
@@ -2326,6 +2326,19 @@ function doPrint(): void {
   host.querySelectorAll<HTMLElement>('.print-page > .slide').forEach((el, i) => {
     applyOverlay(el, slideOverlay(overlay, deck.slides[i]?.id ?? ''));
   });
+  // 数式(KaTeX)と図(Mermaid)を先に描画してから印刷する。未描画のままだと生の $…$ や
+  // mermaid ソースがそのまま PDF に焼き付いてしまう。どちらも DOM のレイアウトに依存せず
+  // 描画できるため、print-deck が画面上では display:none でも問題なく実体化できる。
+  // 数式・図が無いデッキでは即座に返り、KaTeX/Mermaid の遅延チャンクも読み込まれない。
+  if (hasPendingMath(host) || hasPendingMermaid(host)) {
+    setBusy(true, '印刷用に数式・図を描画中…', 0, 1);
+    try {
+      await typesetMath(host);
+      await typesetMermaid(host);
+    } finally {
+      setBusy(false);
+    }
+  }
   window.print();
 }
 
